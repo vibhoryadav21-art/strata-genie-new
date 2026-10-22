@@ -50,3 +50,8 @@ next-env.d.ts
 
 
 !.dev.vars.example
+
+
+worker/.env
+worker/venv/
+worker/__pycache__/

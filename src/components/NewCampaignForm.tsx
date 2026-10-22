@@ -3,14 +3,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { MAX_CAPTION, validateFiles } from "@/lib/uploads";
 
-// Interface for the primary campaign creation response
 interface CampaignResponse {
   error?: string;
-  campaignId: string;
-  uploads: Array<{ url: string }>;
+  campaignId?: string;
+  uploads?: Array<{ url: string }>;
 }
 
-// Interface for the secondary submit response
 interface SubmitResponse {
   error?: string;
 }
@@ -65,22 +63,24 @@ export default function NewCampaignForm() {
           files: files.map((f) => ({ name: f.name, type: f.type, size: f.size })),
         }),
       });
-      
-      // Explicitly typecast the unknown/any json payload response
+
       const data = (await res.json()) as CampaignResponse;
-      if (!res.ok) throw new Error(data.error ?? "Could not create campaign");
+      if (!res.ok || !data.campaignId || !data.uploads) {
+        throw new Error(data.error ?? "Could not create campaign");
+      }
+      const { campaignId, uploads } = data;
 
       await Promise.all(
         files.map((file, i) =>
-          putFile(data.uploads[i].url, file, (pct) =>
+          putFile(uploads[i].url, file, (pct) =>
             setProgress((p) => p.map((v, j) => (j === i ? pct : v)))
           )
         )
       );
 
-      const sub = await fetch(`/api/campaigns/${data.campaignId}/submit`, { method: "POST" });
+      const sub = await fetch(`/api/campaigns/${campaignId}/submit`, { method: "POST" });
       if (!sub.ok) {
-        const subData = (await sub.json()) as SubmitResponse;
+        const subData = (await sub.json().catch(() => ({}))) as SubmitResponse;
         throw new Error(subData.error ?? "Could not submit");
       }
 
@@ -104,9 +104,13 @@ export default function NewCampaignForm() {
       />
       {files.map((f, i) => (
         <div key={i}>
-          <small>{f.name} ({(f.size / 1024 / 1024).toFixed(1)} MB)</small>
+          <small>
+            {f.name} ({(f.size / 1024 / 1024).toFixed(1)} MB)
+          </small>
           {busy && (
-            <div className="bar"><div style={{ width: `${progress[i] ?? 0}%` }} /></div>
+            <div className="bar">
+              <div style={{ width: `${progress[i] ?? 0}%` }} />
+            </div>
           )}
         </div>
       ))}

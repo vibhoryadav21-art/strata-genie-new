@@ -12,7 +12,7 @@ export async function POST(request: Request) {
 
   let body: { caption?: unknown; files?: unknown };
   try {
-    body = await request.json();
+    body = (await request.json()) as { caption?: unknown; files?: unknown };
   } catch {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
