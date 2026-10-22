@@ -39,6 +39,8 @@ class AssetEdit(BaseModel):
 class EditPlan(BaseModel):
     saturation: float
     contrast: float
+    grayscale: bool
+    zoom: float
     trim_seconds: float
     assets: list[AssetEdit]
 
@@ -74,9 +76,13 @@ def build_prompt(user_request: str, media_info: list[dict]) -> str:
         "Edit rules:",
         "- saturation: 1.0 = unchanged, typical range 0.7-1.4 (higher = more vivid)",
         "- contrast: 1.0 = unchanged, typical range 0.9-1.2",
+        "- grayscale: true ONLY if the customer asks for black and white / monochrome, otherwise false",
+        "- zoom: 1.0 = normal crop. Use 1.3-2.0 when the customer asks to bring the subject to the "
+        "centre, to zoom in, or to focus on a small subject. Otherwise 1.0",
         "- trim_seconds: 0 keeps whole videos; otherwise the maximum seconds to keep from the start of every video",
-        "- for EVERY item give focus_x and focus_y between 0 and 1: where the main subject sits "
-        "(0,0 = top-left, 1,1 = bottom-right, 0.5,0.5 = centre), so cropping keeps it in frame",
+        "- for EVERY item give focus_x and focus_y between 0 and 1: the centre point of the main subject "
+        "(or the centre of the group of subjects the customer mentions). 0,0 = top-left, "
+        "1,1 = bottom-right, 0.5,0.5 = centre. The crop will be centred on this point.",
         "",
         "Write one caption and a list of tags for each platform below.",
         "Captions must not contain hashtags. Put hashtags without the # sign in tags.",
@@ -141,6 +147,8 @@ def default_plan() -> dict:
     return {
         "saturation": 1.0,
         "contrast": 1.0,
+        "grayscale": False,
+        "zoom": 1.0,
         "trim_seconds": None,
         "focus": {},
         "fps": 30,
@@ -170,6 +178,8 @@ def sanitize(result: GenieResult, n_assets: int, user_request: str) -> tuple[dic
     e = result.edit
     plan["saturation"] = _num(e.saturation, 0.6, 1.5, 1.0)
     plan["contrast"] = _num(e.contrast, 0.8, 1.3, 1.0)
+    plan["grayscale"] = bool(e.grayscale)
+    plan["zoom"] = _num(e.zoom, 1.0, 2.5, 1.0)
     trim = _num(e.trim_seconds, 0, MAX_VIDEO_SECONDS, 0)
     plan["trim_seconds"] = trim if trim >= 1 else None
     for a in e.assets:

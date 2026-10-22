@@ -30,6 +30,7 @@ s3 = boto3.client(
     aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
     aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
     region_name="auto",
+    # Newer boto3 adds checksum headers that R2 can reject
     config=Config(
         request_checksum_calculation="when_required",
         response_checksum_validation="when_required",
@@ -56,10 +57,24 @@ assert set(PLATFORMS) == set(ai.PLATFORM_RULES), "PLATFORMS and ai.PLATFORM_RULE
 # ---- Media processing -----------------------------------------------------
 def process_image(src: Path, dst: Path, size: tuple[int, int], plan: dict,
                   focus: tuple[float, float]) -> None:
+    W, H = size
     with Image.open(src) as img:
         img = ImageOps.exif_transpose(img).convert("RGB")
-        img = ImageOps.fit(img, size, method=Image.LANCZOS, centering=focus)
-        if plan["saturation"] != 1.0:
+        iw, ih = img.size
+
+        # Size of the crop window (in source pixels) that matches the target shape,
+        # made smaller when the plan asks for zoom.
+        s = max(W / iw, H / ih)
+        cw, ch = W / s / plan["zoom"], H / s / plan["zoom"]
+
+        # Centre the window on the subject, but keep it inside the picture.
+        left = min(max(focus[0] * iw - cw / 2, 0), iw - cw)
+        top = min(max(focus[1] * ih - ch / 2, 0), ih - ch)
+        img = img.resize(size, Image.LANCZOS, box=(left, top, left + cw, top + ch))
+
+        if plan["grayscale"]:
+            img = ImageOps.grayscale(img).convert("RGB")
+        elif plan["saturation"] != 1.0:
             img = ImageEnhance.Color(img).enhance(plan["saturation"])
         if plan["contrast"] != 1.0:
             img = ImageEnhance.Contrast(img).enhance(plan["contrast"])
@@ -70,13 +85,18 @@ def process_video(src: Path, dst: Path, size: tuple[int, int], plan: dict,
                   focus: tuple[float, float]) -> None:
     w, h = size
     fx, fy = focus
+    z = plan["zoom"]
     filters = [
-        f"scale={w}:{h}:force_original_aspect_ratio=increase",
-        f"crop={w}:{h}:(iw-{w})*{fx:.3f}:(ih-{h})*{fy:.3f}",
+        # Scale up so the picture covers the target (bigger when zooming)...
+        f"scale={int(round(w * z))}:{int(round(h * z))}:force_original_aspect_ratio=increase",
+        # ...then cut out a window centred on the subject, kept inside the picture.
+        f"crop={w}:{h}:'min(max({fx:.3f}*iw-{w}/2,0),iw-{w})':'min(max({fy:.3f}*ih-{h}/2,0),ih-{h})'",
         f"fps={plan['fps']}",
     ]
     if plan["saturation"] != 1.0 or plan["contrast"] != 1.0:
         filters.append(f"eq=saturation={plan['saturation']:.3f}:contrast={plan['contrast']:.3f}")
+    if plan["grayscale"]:
+        filters.append("hue=s=0")
     filters.append("format=yuv420p")
 
     duration = plan["trim_seconds"] or plan["max_video_seconds"]
