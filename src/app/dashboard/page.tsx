@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getPlanStatus } from "@/lib/plans";
 import LogoutButton from "@/components/LogoutButton";
+import Link from "next/link";
 
 export default async function Dashboard() {
   const supabase = await createClient();
@@ -43,9 +44,14 @@ export default async function Dashboard() {
           Posts used: {profile.posts_used_this_period}
           {status.limit !== null ? ` / ${status.limit}` : " (unlimited)"}
         </p>
-        <button className="btn" disabled={!status.canPost}>
-          New campaign (coming in Phase 3)
-        </button>
+        
+        {status.canPost ? (
+          <Link href="/campaigns/new" className="btn">
+            New campaign
+          </Link>
+        ) : (
+          <p className="error">Post limit reached or trial expired.</p>
+        )}
       </div>
 
       <h2 style={{ marginTop: 40 }}>History</h2>

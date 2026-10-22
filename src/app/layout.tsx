@@ -11,7 +11,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <header>
-          <Link href="/" className="logo">STRATA</Link>
+          <Link href="/" className="logo">
+  {/* eslint-disable-next-line @next/next/no-img-element */}
+  <img src="/strata-logo.png" alt="STRATA" height={30} style={{ display: "block" }} />
+</Link>
           <Link href="/pricing" className="btn">Subscribe</Link>
         </header>
         {children}
