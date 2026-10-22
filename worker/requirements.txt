@@ -1,0 +1,5 @@
+supabase
+boto3
+Pillow
+python-dotenv
+google-genai
