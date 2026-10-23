@@ -1,4 +1,10 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 function client() {
@@ -47,4 +53,30 @@ export async function presignDownload(key: string, filename: string) {
     }),
     { expiresIn: 3600 }
   );
+}
+
+// Deletes every file in one campaign folder ("userid/campaignid/").
+export async function deletePrefix(prefix: string): Promise<number> {
+  // Safety: refuse anything that isn't exactly "<uuid>/<uuid>/"
+  if (!/^[0-9a-f-]{36}\/[0-9a-f-]{36}\/$/.test(prefix)) {
+    throw new Error("Refusing to delete: unexpected folder name");
+  }
+  const c = client();
+  const Bucket = process.env.R2_BUCKET!;
+  let token: string | undefined;
+  let deleted = 0;
+  do {
+    const list = await c.send(
+      new ListObjectsV2Command({ Bucket, Prefix: prefix, ContinuationToken: token })
+    );
+    const keys = (list.Contents ?? []).map((o) => o.Key).filter((k): k is string => !!k);
+    for (let i = 0; i < keys.length; i += 10) {
+      await Promise.all(
+        keys.slice(i, i + 10).map((Key) => c.send(new DeleteObjectCommand({ Bucket, Key })))
+      );
+    }
+    deleted += keys.length;
+    token = list.IsTruncated ? list.NextContinuationToken : undefined;
+  } while (token);
+  return deleted;
 }

@@ -5,6 +5,7 @@ import { presignDownload, presignView } from "@/lib/r2";
 import { PLATFORM_INFO, PLATFORM_ORDER } from "@/lib/platforms";
 import OutputCard from "@/components/OutputCard";
 import AutoRefresh from "@/components/AutoRefresh";
+import DeleteCampaignButton from "@/components/DeleteCampaignButton";
 
 type Card = {
   id: string;
@@ -132,6 +133,9 @@ export default async function CampaignPage({
           ))}
         </section>
       )}
+      <div style={{ marginTop: 48 }}>
+        <DeleteCampaignButton id={campaign.id} disabled={campaign.status === "processing"} />
+      </div>
     </main>
   );
 }

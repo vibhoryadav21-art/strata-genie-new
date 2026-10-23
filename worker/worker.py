@@ -176,6 +176,12 @@ def handle_job(job: dict) -> None:
     campaign_id = job["campaign_id"]
     user_id = job["user_id"]
 
+    # Only the platforms the user chose (and that we know about).
+    # Old campaigns created before this feature have no choice and get all platforms.
+    platforms = [p for p in (job.get("platforms") or []) if p in PLATFORMS] or list(PLATFORMS)
+    formats = sorted({PLATFORMS[p] for p in platforms})
+    log.info("Platforms: %s -> formats: %s", platforms, formats)
+
     assets = (
         sb.table("media_assets").select("*").eq("campaign_id", campaign_id)
         .order("created_at").execute().data
@@ -183,7 +189,11 @@ def handle_job(job: dict) -> None:
     if not assets:
         raise RuntimeError("Campaign has no media assets")
 
-    formats = sorted(set(PLATFORMS.values()))
+    # Safety: every file must live in this user's own campaign folder
+    prefix = f"{user_id}/{campaign_id}/"
+    if any(not a["storage_key"].startswith(prefix) for a in assets):
+        raise RuntimeError("A media file does not belong to this campaign")
+
     results: dict[str, list[str]] = {fmt: [] for fmt in formats}
 
     with tempfile.TemporaryDirectory() as tmp_name:
@@ -200,14 +210,14 @@ def handle_job(job: dict) -> None:
         # 2. Ask the AI for an edit plan, captions and tags (with safe fallback)
         media_info, previews = build_previews(assets, local, tmp)
         try:
-            result = ai.run_genie(job["caption_input"], media_info, previews)
-            plan, copy = ai.sanitize(result, len(assets), job["caption_input"])
+            result = ai.run_genie(job["caption_input"], media_info, previews, platforms)
+            plan, copy = ai.sanitize(result, len(assets), job["caption_input"], platforms)
             log.info("AI plan: %s", plan)
         except Exception as e:
             log.warning("AI step failed (%s). Using defaults.", e)
-            plan, copy = ai.fallback(job["caption_input"])
+            plan, copy = ai.fallback(job["caption_input"], platforms)
 
-        # 3. Process every file into every format
+        # 3. Process every file into every needed format
         for i, (asset, src) in enumerate(zip(assets, local)):
             is_image = asset["type"] == "image"
             ext = "jpg" if is_image else "mp4"
@@ -229,16 +239,15 @@ def handle_job(job: dict) -> None:
         {
             "campaign_id": campaign_id,
             "platform": platform,
-            "storage_keys": results[fmt],
+            "storage_keys": results[PLATFORMS[platform]],
             "final_caption": copy[platform]["caption"],
             "tags": copy[platform]["tags"],
         }
-        for platform, fmt in PLATFORMS.items()
+        for platform in platforms
     ]
     sb.table("outputs").insert(rows).execute()
     sb.table("campaigns").update({"status": "ready"}).eq("id", campaign_id).execute()
     sb.table("jobs").update({"status": "done", "error": None}).eq("id", job["job_id"]).execute()
-
 
 def fail_job(job: dict, message: str) -> None:
     final = job["attempts"] >= MAX_ATTEMPTS

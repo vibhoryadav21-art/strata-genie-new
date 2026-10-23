@@ -38,3 +38,11 @@ button.btn.secondary { border: 1px solid #111; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .btn.small { padding: 8px 14px; font-size: 0.9rem; }
 a.btn.small.secondary { border: 1px solid #111; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { padding: 6px 12px; border-radius: 999px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 0.9rem; }
+.chip.active { background: #111; color: #fff; border-color: #111; }
+.checks { display: grid; gap: 6px; }
+.checks label { display: flex; gap: 8px; align-items: center; font-weight: 400; }
+.checks input { padding: 0; border: none; width: auto; }
+.linklike { background: none; border: none; padding: 0; text-align: left; color: #555; text-decoration: underline; cursor: pointer; font-size: 0.9rem; }
+.btn.danger { background: #b00020; }

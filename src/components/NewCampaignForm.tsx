@@ -2,6 +2,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { MAX_CAPTION, validateFiles } from "@/lib/uploads";
+import { PLATFORM_INFO, PLATFORM_ORDER } from "@/lib/platforms";
+
+const LOOKS = [
+  "warm and vibrant",
+  "black and white",
+  "bright and clean",
+  "moody and cinematic",
+  "zoom in on the main subject",
+];
+const TONES = ["fun and casual", "professional", "short and punchy", "storytelling"];
 
 interface CampaignResponse {
   error?: string;
@@ -30,8 +40,23 @@ function putFile(url: string, file: File, onProgress: (pct: number) => void) {
   });
 }
 
+function toggle(list: string[], item: string) {
+  return list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
+}
+
+function buildRequest(looks: string[], tones: string[], text: string) {
+  const parts: string[] = [];
+  if (looks.length) parts.push(`Look: ${looks.join(", ")}.`);
+  if (tones.length) parts.push(`Tone: ${tones.join(", ")}.`);
+  if (text.trim()) parts.push(text.trim());
+  return parts.join(" ");
+}
+
 export default function NewCampaignForm() {
   const router = useRouter();
+  const [platforms, setPlatforms] = useState<string[]>([]);
+  const [looks, setLooks] = useState<string[]>([]);
+  const [tones, setTones] = useState<string[]>([]);
   const [caption, setCaption] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState<number[]>([]);
@@ -47,8 +72,13 @@ export default function NewCampaignForm() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const trimmed = caption.trim();
-    if (!trimmed) return setError("Please describe what you want your post to look like.");
+
+    if (platforms.length === 0) return setError("Choose at least one platform.");
+    const request = buildRequest(looks, tones, caption);
+    if (!request) return setError("Pick a look or tone, or describe what you want.");
+    if (request.length > MAX_CAPTION) {
+      return setError(`Your request is too long (${request.length}/${MAX_CAPTION}). Shorten the text.`);
+    }
     const problem = validateFiles(files);
     if (problem) return setError(problem);
 
@@ -59,7 +89,8 @@ export default function NewCampaignForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          caption: trimmed,
+          caption: request,
+          platforms,
           files: files.map((f) => ({ name: f.name, type: f.type, size: f.size })),
         }),
       });
@@ -94,7 +125,32 @@ export default function NewCampaignForm() {
 
   return (
     <form onSubmit={onSubmit} className="form-card" style={{ maxWidth: 560, margin: "24px 0" }}>
-      <label>Photos and videos</label>
+      <label>1. Where do you want to post?</label>
+      <div className="checks">
+        {PLATFORM_ORDER.map((p) => (
+          <label key={p}>
+            <input
+              type="checkbox"
+              disabled={busy}
+              checked={platforms.includes(p)}
+              onChange={() => setPlatforms((cur) => toggle(cur, p))}
+            />
+            {PLATFORM_INFO[p].label} <small>({PLATFORM_INFO[p].format})</small>
+          </label>
+        ))}
+        <button
+          type="button"
+          className="linklike"
+          disabled={busy}
+          onClick={() =>
+            setPlatforms((cur) => (cur.length === PLATFORM_ORDER.length ? [] : [...PLATFORM_ORDER]))
+          }
+        >
+          {platforms.length === PLATFORM_ORDER.length ? "Clear all" : "Select all"}
+        </button>
+      </div>
+
+      <label>2. Photos and videos</label>
       <input
         type="file"
         multiple
@@ -115,14 +171,44 @@ export default function NewCampaignForm() {
         </div>
       ))}
 
-      <label>What should your post look like?</label>
+      <label>3. Pick a look (optional)</label>
+      <div className="chips">
+        {LOOKS.map((l) => (
+          <button
+            type="button"
+            key={l}
+            disabled={busy}
+            className={looks.includes(l) ? "chip active" : "chip"}
+            onClick={() => setLooks((cur) => toggle(cur, l))}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <label>4. Pick a tone (optional)</label>
+      <div className="chips">
+        {TONES.map((t) => (
+          <button
+            type="button"
+            key={t}
+            disabled={busy}
+            className={tones.includes(t) ? "chip active" : "chip"}
+            onClick={() => setTones((cur) => toggle(cur, t))}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <label>5. Anything else? (optional)</label>
       <textarea
-        rows={4}
+        rows={3}
         maxLength={MAX_CAPTION}
         disabled={busy}
         value={caption}
         onChange={(e) => setCaption(e.target.value)}
-        placeholder="e.g. Bright, warm summer vibe, short and punchy, for Instagram Reels"
+        placeholder="e.g. Focus on the two dogs on the right, for our summer sale"
       />
 
       {error && <p className="error">{error}</p>}

@@ -1,0 +1,49 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { deletePrefix } from "@/lib/r2";
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+
+  // Row Level Security: only the user's own campaigns can be found.
+  const { data: campaign } = await supabase
+    .from("campaigns")
+    .select("id, user_id, status")
+    .eq("id", id)
+    .single();
+  if (!campaign) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  if (campaign.status === "processing") {
+    return NextResponse.json(
+      { error: "Genie is working on this campaign right now. Try again when it's finished." },
+      { status: 409 }
+    );
+  }
+
+  // Files first. If this fails, nothing is lost and the user can simply retry.
+  try {
+    await deletePrefix(`${campaign.user_id}/${campaign.id}/`);
+  } catch {
+    return NextResponse.json({ error: "Could not delete the files. Please try again." }, { status: 500 });
+  }
+
+  // Then the database rows (media, outputs and jobs are removed automatically).
+  const { data: deleted, error } = await supabase
+    .from("campaigns")
+    .delete()
+    .eq("id", id)
+    .select("id");
+  if (error || !deleted || deleted.length === 0) {
+    return NextResponse.json({ error: "Could not delete the campaign." }, { status: 400 });
+  }
+
+  return NextResponse.json({ ok: true });
+}

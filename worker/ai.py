@@ -64,7 +64,7 @@ SYSTEM = (
 )
 
 
-def build_prompt(user_request: str, media_info: list[dict]) -> str:
+def build_prompt(user_request: str, media_info: list[dict], platforms: list[str]) -> str:
     lines = ['Customer request:', f'"""{user_request}"""', "", "Media items:"]
     for m in media_info:
         if m["type"] == "video":
@@ -89,7 +89,8 @@ def build_prompt(user_request: str, media_info: list[dict]) -> str:
         "Follow the tone the customer asks for, and write in the language of the customer's request.",
         "Platforms:",
     ]
-    for pid, r in PLATFORM_RULES.items():
+    for pid in platforms:
+        r = PLATFORM_RULES[pid]
         lines.append(
             f'- platform "{pid}" ({r["label"]}): max {r["max_chars"]} characters, '
             f'up to {r["max_tags"]} tags. {r["style"]}'
@@ -98,14 +99,14 @@ def build_prompt(user_request: str, media_info: list[dict]) -> str:
 
 
 def run_genie(user_request: str, media_info: list[dict],
-              previews: list[tuple[int, bytes]]) -> GenieResult:
+              previews: list[tuple[int, bytes]], platforms: list[str]) -> GenieResult:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set")
     model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
     client = genai.Client(api_key=api_key)
 
-    contents: list = [build_prompt(user_request, media_info)]
+    contents: list = [build_prompt(user_request, media_info, platforms)]
     for idx, data in previews:
         contents.append(f"Preview from item {idx}:")
         contents.append(types.Part.from_bytes(data=data, mime_type="image/jpeg"))
@@ -173,7 +174,8 @@ def clean_tags(tags: list[str], limit: int) -> list[str]:
     return out[:limit]
 
 
-def sanitize(result: GenieResult, n_assets: int, user_request: str) -> tuple[dict, dict]:
+def sanitize(result: GenieResult, n_assets: int, user_request: str,
+             platforms: list[str]) -> tuple[dict, dict]:
     plan = default_plan()
     e = result.edit
     plan["saturation"] = _num(e.saturation, 0.6, 1.5, 1.0)
@@ -188,7 +190,8 @@ def sanitize(result: GenieResult, n_assets: int, user_request: str) -> tuple[dic
 
     by_platform = {p.platform: p for p in result.posts}
     copy = {}
-    for pid, rules in PLATFORM_RULES.items():
+    for pid in platforms:
+        rules = PLATFORM_RULES[pid]
         p = by_platform.get(pid)
         caption = clean_caption(p.caption if p else "", rules["max_chars"])
         copy[pid] = {
@@ -198,9 +201,9 @@ def sanitize(result: GenieResult, n_assets: int, user_request: str) -> tuple[dic
     return plan, copy
 
 
-def fallback(user_request: str) -> tuple[dict, dict]:
+def fallback(user_request: str, platforms: list[str]) -> tuple[dict, dict]:
     copy = {
-        pid: {"caption": clean_caption(user_request, r["max_chars"]), "tags": []}
-        for pid, r in PLATFORM_RULES.items()
+        pid: {"caption": clean_caption(user_request, PLATFORM_RULES[pid]["max_chars"]), "tags": []}
+        for pid in platforms
     }
     return default_plan(), copy
