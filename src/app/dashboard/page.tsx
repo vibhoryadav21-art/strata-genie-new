@@ -64,7 +64,7 @@ export default async function Dashboard() {
             {campaigns.map((c) => (
               <tr key={c.id}>
                 <td>{new Date(c.created_at).toLocaleDateString()}</td>
-                <td>{c.caption_input}</td>
+                <td><Link href={`/campaigns/${c.id}`}>{c.caption_input}</Link></td>
                 <td>{c.status}</td>
               </tr>
             ))}

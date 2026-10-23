@@ -31,3 +31,10 @@ button.btn.secondary { border: 1px solid #111; }
 .form-card textarea { padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; font-family: inherit; }
 .bar { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; margin-top: 4px; }
 .bar > div { height: 100%; background: #111; transition: width 0.2s; }
+.previews { display: flex; gap: 8px; overflow-x: auto; margin: 16px 0; }
+.previews img, .previews video { height: 260px; width: auto; border-radius: 8px; background: #eee; flex-shrink: 0; }
+.field-label { display: block; margin: 12px 0 4px; font-weight: 600; font-size: 0.9rem; }
+.full { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; font-family: inherit; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.btn.small { padding: 8px 14px; font-size: 0.9rem; }
+a.btn.small.secondary { border: 1px solid #111; }
