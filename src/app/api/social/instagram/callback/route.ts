@@ -13,7 +13,8 @@ type Profile = { user_id?: string | number; id?: string | number; username?: str
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const origin = url.origin;
+  const origin = process.env.SITE_URL ?? url.origin;
+  const redirectUri = `${origin}/api/social/instagram/callback`;
   const back = (msg: string) =>
     NextResponse.redirect(`${origin}/accounts?error=${encodeURIComponent(msg)}`);
 
@@ -43,13 +44,19 @@ export async function GET(request: Request) {
         client_id: clientId,
         client_secret: clientSecret,
         grant_type: "authorization_code",
-        redirect_uri: `${origin}/api/social/instagram/callback`,
+        redirect_uri: redirectUri,
         code,
       }),
     });
     const j1 = (await r1.json()) as ShortToken;
     const shortToken = j1.data?.[0]?.access_token ?? j1.access_token;
-    if (!r1.ok || !shortToken) throw new Error(j1.error_message ?? "Instagram refused the login.");
+    if (!r1.ok || !shortToken) {
+      const odd = /[^\x21-\x7e]/.test(clientSecret) ? "yes" : "no";
+      throw new Error(
+        `${j1.error_message ?? "Instagram refused the login."} ` +
+          `(app id: ${clientId}, secret length: ${clientSecret.length}, secret has odd characters: ${odd})`
+      );
+    }
 
     // 2. Short-lived -> long-lived token (60 days)
     const r2 = await fetch(

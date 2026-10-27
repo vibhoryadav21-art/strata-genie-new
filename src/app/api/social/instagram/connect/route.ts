@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: Request) {
-  const origin = new URL(request.url).origin;
+    const origin = process.env.SITE_URL ?? new URL(request.url).origin;
   const supabase = await createClient();
   const {
     data: { user },
@@ -17,6 +17,12 @@ export async function GET(request: Request) {
     scope: "instagram_business_basic,instagram_business_content_publish",
     state,
   });
+
+  if (new URL(request.url).searchParams.get("debug") === "1") {
+    return NextResponse.json({
+      url: `https://www.instagram.com/oauth/authorize?${params}`,
+    });
+  }
 
   const res = NextResponse.redirect(`https://www.instagram.com/oauth/authorize?${params}`);
   res.cookies.set("ig_oauth_state", state, {
