@@ -46,3 +46,6 @@ a.btn.small.secondary { border: 1px solid #111; }
 .checks input { padding: 0; border: none; width: auto; }
 .linklike { background: none; border: none; padding: 0; text-align: left; color: #555; text-decoration: underline; cursor: pointer; font-size: 0.9rem; }
 .btn.danger { background: #b00020; }
+.publish { margin-top: 20px; padding-top: 16px; border-top: 1px solid #eee; }
+.post-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 8px; font-size: 0.9rem; }
+.publish-controls input[type="datetime-local"] { padding: 6px; border: 1px solid #ccc; border-radius: 6px; }

@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from datetime import datetime, timezone
+import instagram  # noqa: E402
 
 import boto3
 from botocore.config import Config
@@ -17,6 +19,7 @@ import ai  # noqa: E402  (after load_dotenv so settings are available)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("worker")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 MAX_ATTEMPTS = 3
 POLL_SECONDS = 10
@@ -258,31 +261,117 @@ def fail_job(job: dict, message: str) -> None:
         sb.table("campaigns").update({"status": "failed"}).eq("id", job["campaign_id"]).execute()
 
 
+# ---- Publishing posts -----------------------------------------------------
+def claim_post() -> dict | None:
+    res = sb.rpc("claim_next_post").execute()
+    return res.data or None
+
+
+def handle_post(post: dict) -> None:
+    if post["account_platform"] != "instagram":
+        raise RuntimeError(f"Posting to {post['account_platform']} is not supported yet")
+
+    keys = post["storage_keys"] or []
+    if not keys:
+        raise RuntimeError("Nothing to post")
+
+    # Instagram downloads the files itself, so it needs temporary public links
+    items = [
+        {
+            "kind": "video" if k.lower().endswith(".mp4") else "image",
+            "url": s3.generate_presigned_url(
+                "get_object", Params={"Bucket": BUCKET, "Key": k}, ExpiresIn=7200
+            ),
+        }
+        for k in keys
+    ]
+
+    caption = post["caption"] or ""
+    tags = post["tags"] or []
+    if tags:
+        caption += "\n\n" + " ".join(f"#{t}" for t in tags)
+
+    token = instagram.decrypt_token(post["token_encrypted"])
+    expires = datetime.fromisoformat(post["token_expires_at"])
+    refreshed = instagram.refresh_if_needed(token, expires)
+    if refreshed:
+        token, expires = refreshed
+        sb.table("social_tokens").update({
+            "token_encrypted": instagram.encrypt_token(token),
+            "expires_at": expires.isoformat(),
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("account_id", post["account_id"]).execute()
+
+    media_id = instagram.publish(token, post["external_id"], post["platform"], items, caption)
+
+    now = datetime.now(timezone.utc).isoformat()
+    sb.table("post_jobs").update({
+        "status": "published", "external_post_id": media_id,
+        "published_at": now, "error": None,
+    }).eq("id", post["post_id"]).execute()
+    sb.table("outputs").update({"posted_at": now}).eq("id", post["output_id"]).execute()
+    sb.table("campaigns").update({"status": "posted"}).eq("id", post["campaign_id"]).eq("status", "ready").execute()
+
+
+def fail_post(post: dict, message: str) -> None:
+    sb.table("post_jobs").update(
+        {"status": "failed", "error": message[:500]}
+    ).eq("id", post["post_id"]).execute()
+
+
+def process_next_post() -> bool:
+    post = None
+    try:
+        post = claim_post()
+        if post is None:
+            return False
+        log.info("Publishing %s to account %s", post["platform"], post["account_id"])
+        handle_post(post)
+        log.info("Published post %s", post["post_id"])
+        return True
+    except Exception as e:
+        log.exception("Publishing failed")
+        if post:
+            try:
+                fail_post(post, str(e))
+            except Exception:
+                log.exception("Could not record the failure")
+            return True
+        return False
+
+
+def process_next_job() -> bool:
+    job = None
+    try:
+        job = claim_job()
+        if job is None:
+            return False
+        log.info("Claimed job %s (attempt %s)", job["job_id"], job["attempts"])
+        handle_job(job)
+        log.info("Finished job %s", job["job_id"])
+        return True
+    except Exception as e:
+        log.exception("Job failed")
+        if job:
+            try:
+                fail_job(job, str(e))
+            except Exception:
+                log.exception("Could not record the failure")
+            return True
+        return False
+
+
 def main() -> None:
     if os.environ.get("GEMINI_API_KEY"):
         log.info("AI enabled (model: %s)", os.environ.get("GEMINI_MODEL", "gemini-flash-latest"))
     else:
         log.warning("GEMINI_API_KEY not set: AI disabled, using defaults")
-    log.info("Worker started. Waiting for jobs…")
+    log.info("Worker started. Waiting for jobs and scheduled posts…")
     while True:
-        job = None
-        try:
-            job = claim_job()
-            if job is None:
-                time.sleep(POLL_SECONDS)
-                continue
-            log.info("Claimed job %s (attempt %s)", job["job_id"], job["attempts"])
-            handle_job(job)
-            log.info("Finished job %s", job["job_id"])
-        except Exception as e:
-            log.exception("Job failed")
-            if job:
-                try:
-                    fail_job(job, str(e))
-                except Exception:
-                    log.exception("Could not record the failure")
-            else:
-                time.sleep(POLL_SECONDS)
+        did_post = process_next_post()
+        did_job = process_next_job()
+        if not (did_post or did_job):
+            time.sleep(POLL_SECONDS)
 
 
 if __name__ == "__main__":

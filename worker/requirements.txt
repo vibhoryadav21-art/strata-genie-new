@@ -3,3 +3,5 @@ boto3
 Pillow
 python-dotenv
 google-genai
+httpx
+cryptography

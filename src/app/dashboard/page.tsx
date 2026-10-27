@@ -52,6 +52,10 @@ export default async function Dashboard() {
         ) : (
           <p className="error">Post limit reached or trial expired.</p>
         )}
+
+        <p style={{ marginTop: "12px" }}>
+          <Link href="/accounts">Connected accounts</Link>
+        </p>
       </div>
 
       <h2 style={{ marginTop: 40 }}>History</h2>

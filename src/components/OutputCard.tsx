@@ -3,8 +3,18 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PLATFORM_INFO, composePost, parseTags } from "@/lib/platforms";
+import PublishControls, { type Account } from "@/components/PublishControls";
+import ActionButton from "@/components/ActionButton";
 
 type FileItem = { kind: "image" | "video"; viewUrl: string; downloadUrl: string };
+export type PostRow = {
+  id: string;
+  status: string;
+  scheduled_for: string;
+  published_at: string | null;
+  error: string | null;
+  username: string | null;
+};
 
 export default function OutputCard({
   id,
@@ -13,6 +23,10 @@ export default function OutputCard({
   initialCaption,
   initialTags,
   postedAt,
+  supported,
+  blockedReason,
+  accounts,
+  posts,
 }: {
   id: string;
   platform: string;
@@ -20,6 +34,10 @@ export default function OutputCard({
   initialCaption: string;
   initialTags: string[];
   postedAt: string | null;
+  supported: boolean;
+  blockedReason: string | null;
+  accounts: Account[];
+  posts: PostRow[];
 }) {
   const router = useRouter();
   const info = PLATFORM_INFO[platform];
@@ -148,9 +166,60 @@ export default function OutputCard({
       </div>
       {dirty && !postedAt && (
         <p style={{ margin: "8px 0 0" }}>
-          <small>Save your changes before marking as posted.</small>
+          <small>Save your changes before posting or marking as posted.</small>
         </p>
       )}
+
+      <div className="publish">
+        <h4 style={{ margin: "0 0 8px" }}>Publish</h4>
+        {!supported ? (
+          <p style={{ margin: 0 }}>
+            <small>
+              Direct posting to {info.label} is coming soon. Download the file and copy the
+              caption to post it yourself.
+            </small>
+          </p>
+        ) : blockedReason ? (
+          <p className="error" style={{ margin: 0 }}>
+            <small>{blockedReason}</small>
+          </p>
+        ) : dirty ? (
+          <p style={{ margin: 0 }}>
+            <small>Save your changes first, then you can publish.</small>
+          </p>
+        ) : (
+          <PublishControls outputIds={[id]} accounts={accounts} />
+        )}
+
+        {posts.map((p) => (
+          <div key={p.id} className="post-row">
+            <span>
+              @{p.username ?? "disconnected account"} ·{" "}
+              <strong>{p.status}</strong>
+              {p.status === "scheduled" && (
+                <>
+                  {" "}for{" "}
+                  <span suppressHydrationWarning>
+                    {new Date(p.scheduled_for).toLocaleString()}
+                  </span>
+                </>
+              )}
+              {p.status === "published" && p.published_at && (
+                <>
+                  {" "}on{" "}
+                  <span suppressHydrationWarning>
+                    {new Date(p.published_at).toLocaleString()}
+                  </span>
+                </>
+              )}
+              {p.error && <span className="error"> {p.error}</span>}
+            </span>
+            {p.status === "scheduled" && (
+              <ActionButton url={`/api/posts/${p.id}`} method="DELETE" label="Cancel" />
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

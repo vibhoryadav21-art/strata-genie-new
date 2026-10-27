@@ -1,4 +1,4 @@
-// Rough limits for the editor. We'll verify each platform's real rules in Phase 5b.
+// Rough limits for the editor. We'll verify each platform's real rules per platform later.
 // Keep the keys identical to PLATFORMS in worker/worker.py.
 export const PLATFORM_INFO: Record<
   string,
@@ -21,4 +21,25 @@ export function composePost(caption: string, tags: string[]): string {
 
 export function parseTags(text: string): string[] {
   return Array.from(new Set(text.split(/[\s,#]+/).filter(Boolean)));
+}
+
+// Which kind of connected account can publish this version? null = not supported yet.
+export function accountPlatformOf(platform: string): string | null {
+  if (platform.startsWith("instagram_")) return "instagram";
+  return null;
+}
+
+export function kindOf(storageKey: string): "image" | "video" {
+  return storageKey.toLowerCase().endsWith(".mp4") ? "video" : "image";
+}
+
+// Returns a reason if this version can't be posted, otherwise null.
+export function checkPostable(platform: string, kinds: ("image" | "video")[]): string | null {
+  if (platform === "instagram_reels" && (kinds.length !== 1 || kinds[0] !== "video")) {
+    return "Instagram Reels need exactly one video.";
+  }
+  if (platform === "instagram_feed" && (kinds.length < 1 || kinds.length > 10)) {
+    return "Instagram posts need between 1 and 10 files.";
+  }
+  return null;
 }
