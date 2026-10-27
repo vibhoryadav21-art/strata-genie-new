@@ -51,11 +51,7 @@ export async function GET(request: Request) {
     const j1 = (await r1.json()) as ShortToken;
     const shortToken = j1.data?.[0]?.access_token ?? j1.access_token;
     if (!r1.ok || !shortToken) {
-      const odd = /[^\x21-\x7e]/.test(clientSecret) ? "yes" : "no";
-      throw new Error(
-        `${j1.error_message ?? "Instagram refused the login."} ` +
-          `(app id: ${clientId}, secret length: ${clientSecret.length}, secret has odd characters: ${odd})`
-      );
+      throw new Error(j1.error_message ?? "Instagram refused the login.");
     }
 
     // 2. Short-lived -> long-lived token (60 days)
