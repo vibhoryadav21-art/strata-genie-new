@@ -16,13 +16,13 @@ export async function GET(request: Request) {
   const origin = process.env.SITE_URL ?? url.origin;
   const redirectUri = `${origin}/api/social/instagram/callback`;
   const back = (msg: string) =>
-    NextResponse.redirect(`${origin}/accounts?error=${encodeURIComponent(msg)}`);
+    NextResponse.redirect(`${origin}/genie/accounts?error=${encodeURIComponent(msg)}`);
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.redirect(`${origin}/login`);
+  if (!user) return NextResponse.redirect(`${origin}/genie/login`);
 
   if (url.searchParams.get("error")) return back("The Instagram connection was cancelled.");
 
@@ -92,7 +92,7 @@ export async function GET(request: Request) {
     return back(e instanceof Error ? e.message : "Could not connect Instagram.");
   }
 
-  const res = NextResponse.redirect(`${origin}/accounts?connected=1`);
+  const res = NextResponse.redirect(`${origin}/genie/accounts?connected=1`);
   res.cookies.delete("ig_oauth_state");
   return res;
 }

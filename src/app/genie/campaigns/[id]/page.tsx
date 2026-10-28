@@ -13,6 +13,7 @@ import OutputCard, { type PostRow } from "@/components/OutputCard";
 import PublishControls, { type Account } from "@/components/PublishControls";
 import AutoRefresh from "@/components/AutoRefresh";
 import DeleteCampaignButton from "@/components/DeleteCampaignButton";
+import ActionButton from "@/components/ActionButton";
 
 type Card = {
   id: string;
@@ -47,12 +48,12 @@ export default async function CampaignPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  if (!user) redirect("/genie/login");
 
   // Row Level Security: other people's campaigns simply aren't found.
   const { data: campaign } = await supabase
     .from("campaigns")
-    .select("id, caption_input, status, created_at")
+    .select("id, caption_input, status, created_at, ai_note")
     .eq("id", id)
     .single();
   if (!campaign) notFound();
@@ -133,7 +134,7 @@ export default async function CampaignPage({
   return (
     <main className="container">
       <p>
-        <Link href="/dashboard">← Back to dashboard</Link>
+        <Link href="/genie/campaigns">← Back to dashboard</Link>
       </p>
       <h1>Your campaign</h1>
       <div className="card">
@@ -179,6 +180,19 @@ export default async function CampaignPage({
             Check each version and adjust the text. Save your changes, then publish from here, or
             download the file and post it yourself.
           </p>
+
+          {campaign.ai_note && (
+            <div className="banner">
+              <p style={{ margin: "0 0 8px" }}>
+                Genie's AI couldn't be used for this campaign, so the text below is only a basic
+                version, and nothing was posted automatically. You can edit it yourself, or try again.
+              </p>
+              <ActionButton
+                url={`/api/campaigns/${campaign.id}/regenerate`}
+                label="Regenerate with AI"
+              />
+            </div>
+          )}
 
           {postableIds.length > 0 && (
             <div className="card" style={{ marginBottom: 24 }}>

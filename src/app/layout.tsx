@@ -1,22 +1,23 @@
 import "./globals.css";
-import Link from "next/link";
+import SiteHeader from "@/components/SiteHeader";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata = {
-  title: "STRATA Genie",
-  description: "Turn your photos and videos into ready-to-post social content.",
+  title: { default: "STRATA", template: "%s · STRATA" },
+  description:
+    "STRATA builds focused software products. Genie turns photos and videos into ready-to-post social content.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   return (
     <html lang="en">
       <body>
-        <header>
-          <Link href="/" className="logo">
-  {/* eslint-disable-next-line @next/next/no-img-element */}
-  <img src="/strata-logo.png" alt="STRATA" height={30} style={{ display: "block" }} />
-</Link>
-          <Link href="/pricing" className="btn">Subscribe</Link>
-        </header>
+        <SiteHeader loggedIn={!!user} />
         {children}
         <footer>© {new Date().getFullYear()} STRATA. All rights reserved.</footer>
       </body>

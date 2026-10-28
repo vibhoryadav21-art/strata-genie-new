@@ -175,12 +175,68 @@ def claim_job() -> dict | None:
     return res.data or None
 
 
+def check_postable(platform: str, kinds: list[str]) -> str | None:
+    if platform == "instagram_reels" and (len(kinds) != 1 or kinds[0] != "video"):
+        return "Instagram Reels need exactly one video."
+    if platform == "instagram_feed" and not (1 <= len(kinds) <= 10):
+        return "Instagram posts need between 1 and 10 files."
+    return None
+
+
+def queue_auto_posts(campaign: dict, user_id: str, outputs: list[dict]) -> None:
+    """Creates the posts the customer asked for at campaign creation (now or scheduled)."""
+    mode = campaign.get("publish_mode") or "manual"
+    account_ids = campaign.get("publish_account_ids") or []
+    if mode == "manual" or not account_ids:
+        return
+
+    # Only accounts that really belong to this customer
+    accounts = (
+        sb.table("social_accounts").select("id, platform")
+        .eq("user_id", user_id).in_("id", account_ids).execute().data
+    )
+
+    when = datetime.now(timezone.utc)
+    if mode == "scheduled" and campaign.get("publish_at"):
+        when = max(when, datetime.fromisoformat(campaign["publish_at"]))
+
+    rows = []
+    for out in outputs:
+        if not out["platform"].startswith("instagram_"):
+            continue
+        kinds = ["video" if k.lower().endswith(".mp4") else "image" for k in out["storage_keys"]]
+        issue = check_postable(out["platform"], kinds)
+        for acc in accounts:
+            if acc["platform"] != "instagram":
+                continue
+            row = {
+                "output_id": out["id"],
+                "social_account_id": acc["id"],
+                "scheduled_for": when.isoformat(),
+            }
+            if issue:  # recorded as failed so the customer can see why
+                row["status"] = "failed"
+                row["error"] = issue
+            rows.append(row)
+
+    if rows:
+        sb.table("post_jobs").insert(rows).execute()
+        log.info("Queued %d automatic post(s) for %s", len(rows), when.isoformat())
+
+
+
 def handle_job(job: dict) -> None:
     campaign_id = job["campaign_id"]
     user_id = job["user_id"]
 
+    campaign = (
+        sb.table("campaigns")
+        .select("notes, publish_mode, publish_at, publish_account_ids")
+        .eq("id", campaign_id).single().execute().data
+    )
+    notes = campaign.get("notes") or ""
+
     # Only the platforms the user chose (and that we know about).
-    # Old campaigns created before this feature have no choice and get all platforms.
     platforms = [p for p in (job.get("platforms") or []) if p in PLATFORMS] or list(PLATFORMS)
     formats = sorted({PLATFORMS[p] for p in platforms})
     log.info("Platforms: %s -> formats: %s", platforms, formats)
@@ -198,6 +254,7 @@ def handle_job(job: dict) -> None:
         raise RuntimeError("A media file does not belong to this campaign")
 
     results: dict[str, list[str]] = {fmt: [] for fmt in formats}
+    ai_note: str | None = None
 
     with tempfile.TemporaryDirectory() as tmp_name:
         tmp = Path(tmp_name)
@@ -210,15 +267,20 @@ def handle_job(job: dict) -> None:
             s3.download_file(BUCKET, asset["storage_key"], str(src))
             local.append(src)
 
-        # 2. Ask the AI for an edit plan, captions and tags (with safe fallback)
+        # 2. Ask the AI for an edit plan, captions and tags
         media_info, previews = build_previews(assets, local, tmp)
         try:
             result = ai.run_genie(job["caption_input"], media_info, previews, platforms)
-            plan, copy = ai.sanitize(result, len(assets), job["caption_input"], platforms)
+            plan, copy = ai.sanitize(result, len(assets), notes, platforms)
             log.info("AI plan: %s", plan)
         except Exception as e:
-            log.warning("AI step failed (%s). Using defaults.", e)
-            plan, copy = ai.fallback(job["caption_input"], platforms)
+            message = str(e)
+            key = os.environ.get("GEMINI_API_KEY")
+            if key:
+                message = message.replace(key, "***")
+            log.warning("AI step failed (%s). Using basic defaults.", message)
+            ai_note = message[:300]
+            plan, copy = ai.fallback(notes, platforms)
 
         # 3. Process every file into every needed format
         for i, (asset, src) in enumerate(zip(assets, local)):
@@ -231,9 +293,9 @@ def handle_job(job: dict) -> None:
                 dst = tmp / f"out_{fmt}_{i}.{ext}"
                 log.info("Processing item %d as %s", i, fmt)
                 (process_image if is_image else process_video)(src, dst, FORMATS[fmt], plan, focus)
-                key = f"{user_id}/{campaign_id}/out/{fmt}-{i}.{ext}"
-                s3.upload_file(str(dst), BUCKET, key, ExtraArgs={"ContentType": content_type})
-                results[fmt].append(key)
+                key_out = f"{user_id}/{campaign_id}/out/{fmt}-{i}.{ext}"
+                s3.upload_file(str(dst), BUCKET, key_out, ExtraArgs={"ContentType": content_type})
+                results[fmt].append(key_out)
                 dst.unlink()
 
     # 4. Save outputs (delete old ones first so retries don't create duplicates)
@@ -248,8 +310,19 @@ def handle_job(job: dict) -> None:
         }
         for platform in platforms
     ]
-    sb.table("outputs").insert(rows).execute()
-    sb.table("campaigns").update({"status": "ready"}).eq("id", campaign_id).execute()
+    inserted = sb.table("outputs").insert(rows).execute().data
+
+    # 5. Automatic posting, only when the AI step worked (never post unreviewed fallback text)
+    if (campaign.get("publish_mode") or "manual") != "manual":
+        if ai_note is None:
+            try:
+                queue_auto_posts(campaign, user_id, inserted)
+            except Exception:
+                log.exception("Could not queue the automatic posts")
+        else:
+            log.warning("Not posting automatically because the AI step failed")
+
+    sb.table("campaigns").update({"status": "ready", "ai_note": ai_note}).eq("id", campaign_id).execute()
     sb.table("jobs").update({"status": "done", "error": None}).eq("id", job["job_id"]).execute()
 
 def fail_job(job: dict, message: str) -> None:

@@ -4,6 +4,16 @@ import { presignUpload } from "@/lib/r2";
 import { TYPE_INFO, MAX_CAPTION, validateFiles } from "@/lib/uploads";
 import { PLATFORM_INFO } from "@/lib/platforms";
 
+type Body = {
+  caption?: unknown;
+  notes?: unknown;
+  files?: unknown;
+  platforms?: unknown;
+  publishMode?: unknown;
+  publishAt?: unknown;
+  accountIds?: unknown;
+};
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -11,18 +21,15 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
 
-  let body: { caption?: unknown; files?: unknown; platforms?: unknown };
+  let body: Body;
   try {
-    body = (await request.json()) as {
-      caption?: unknown;
-      files?: unknown;
-      platforms?: unknown;
-    };
+    body = (await request.json()) as Body;
   } catch {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
   const caption = String(body.caption ?? "").trim();
+  const notes = String(body.notes ?? "").trim().slice(0, MAX_CAPTION);
   if (!caption || caption.length > MAX_CAPTION) {
     return NextResponse.json(
       { error: `Your request must be 1-${MAX_CAPTION} characters.` },
@@ -46,10 +53,46 @@ export async function POST(request: Request) {
   const problem = validateFiles(files);
   if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 
+  // When should it be posted? manual = the customer reviews first and posts later
+  const mode = ["manual", "now", "scheduled"].includes(String(body.publishMode))
+    ? String(body.publishMode)
+    : "manual";
+  let publishAt: string | null = null;
+  let accountIds: string[] = [];
+
+  if (mode !== "manual") {
+    const ids = (Array.isArray(body.accountIds) ? body.accountIds : []).map(String).slice(0, 10);
+    // Row Level Security: only the user's own accounts come back.
+    const { data: owned } = await supabase.from("social_accounts").select("id").in("id", ids);
+    accountIds = (owned ?? []).map((a) => String(a.id));
+    if (accountIds.length === 0) {
+      return NextResponse.json({ error: "Choose a connected account to post to." }, { status: 400 });
+    }
+    if (mode === "scheduled") {
+      const d = new Date(String(body.publishAt ?? ""));
+      const now = Date.now();
+      if (Number.isNaN(d.getTime()) || d.getTime() < now - 60_000 || d.getTime() > now + 30 * 86_400_000) {
+        return NextResponse.json(
+          { error: "Choose a time within the next 30 days." },
+          { status: 400 }
+        );
+      }
+      publishAt = d.toISOString();
+    }
+  }
+
   // The database trigger enforces the trial and plan limits here.
   const { data: campaign, error } = await supabase
     .from("campaigns")
-    .insert({ user_id: user.id, caption_input: caption, platforms })
+    .insert({
+      user_id: user.id,
+      caption_input: caption,
+      notes,
+      platforms,
+      publish_mode: mode,
+      publish_at: publishAt,
+      publish_account_ids: accountIds,
+    })
     .select("id")
     .single();
   if (error || !campaign) {

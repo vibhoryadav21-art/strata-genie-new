@@ -24,7 +24,7 @@ export default function DeleteCampaignButton({
       setBusy(false);
       return;
     }
-    router.push("/dashboard");
+    router.push("/genie/campaigns");
     router.refresh();
   }
 

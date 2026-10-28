@@ -68,7 +68,7 @@ def build_prompt(user_request: str, media_info: list[dict], platforms: list[str]
     lines = ['Customer request:', f'"""{user_request}"""', "", "Media items:"]
     for m in media_info:
         if m["type"] == "video":
-            lines.append(f"- item {m['index']}: video, {m['duration']:.1f} seconds")
+            lines.append(f"- item {m['index']}: video, {m.get('duration', 0):.1f} seconds")
         else:
             lines.append(f"- item {m['index']}: photo")
     lines += [
@@ -84,9 +84,13 @@ def build_prompt(user_request: str, media_info: list[dict], platforms: list[str]
         "(or the centre of the group of subjects the customer mentions). 0,0 = top-left, "
         "1,1 = bottom-right, 0.5,0.5 = centre. The crop will be centred on this point.",
         "",
-        "Write one caption and a list of tags for each platform below.",
-        "Captions must not contain hashtags. Put hashtags without the # sign in tags.",
-        "Follow the tone the customer asks for, and write in the language of the customer's request.",
+        "Write one caption and a list of tags for each platform below:",
+        "- First look carefully at the preview images. Base the text on what is actually visible in them, "
+        "combined with the customer's request. Never mention things you cannot see.",
+        "- Captions must not contain hashtags. Put hashtags without the # sign in tags.",
+        "- Tags must be relevant to the content: mix specific tags (what is in the pictures) with broader ones. "
+        "Use at least half of the allowed number of tags for each platform, rounded up.",
+        "- Follow the tone the customer asks for, and write in the language of the customer's request.",
         "Platforms:",
     ]
     for pid in platforms:
@@ -174,7 +178,7 @@ def clean_tags(tags: list[str], limit: int) -> list[str]:
     return out[:limit]
 
 
-def sanitize(result: GenieResult, n_assets: int, user_request: str,
+def sanitize(result: GenieResult, n_assets: int, fallback_text: str,
              platforms: list[str]) -> tuple[dict, dict]:
     plan = default_plan()
     e = result.edit
@@ -195,15 +199,16 @@ def sanitize(result: GenieResult, n_assets: int, user_request: str,
         p = by_platform.get(pid)
         caption = clean_caption(p.caption if p else "", rules["max_chars"])
         copy[pid] = {
-            "caption": caption or clean_caption(user_request, rules["max_chars"]),
+            "caption": caption or clean_caption(fallback_text, rules["max_chars"]),
             "tags": clean_tags(p.tags if p else [], rules["max_tags"]),
         }
     return plan, copy
 
 
-def fallback(user_request: str, platforms: list[str]) -> tuple[dict, dict]:
+def fallback(user_text: str, platforms: list[str]) -> tuple[dict, dict]:
+    """Used when the AI is unavailable. user_text = only what the customer typed themselves."""
     copy = {
-        pid: {"caption": clean_caption(user_request, PLATFORM_RULES[pid]["max_chars"]), "tags": []}
+        pid: {"caption": clean_caption(user_text, PLATFORM_RULES[pid]["max_chars"]), "tags": []}
         for pid in platforms
     }
     return default_plan(), copy

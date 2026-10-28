@@ -1,8 +1,10 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MAX_CAPTION, validateFiles } from "@/lib/uploads";
-import { PLATFORM_INFO, PLATFORM_ORDER } from "@/lib/platforms";
+import { PLATFORM_INFO, PLATFORM_ORDER, accountPlatformOf, checkPostable } from "@/lib/platforms";
+import type { Account } from "@/components/PublishControls";
 
 const LOOKS = [
   "warm and vibrant",
@@ -22,6 +24,8 @@ interface CampaignResponse {
 interface SubmitResponse {
   error?: string;
 }
+
+type Mode = "manual" | "now" | "scheduled";
 
 function putFile(url: string, file: File, onProgress: (pct: number) => void) {
   return new Promise<void>((resolve, reject) => {
@@ -52,7 +56,7 @@ function buildRequest(looks: string[], tones: string[], text: string) {
   return parts.join(" ");
 }
 
-export default function NewCampaignForm() {
+export default function NewCampaignForm({ accounts }: { accounts: Account[] }) {
   const router = useRouter();
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [looks, setLooks] = useState<string[]>([]);
@@ -60,8 +64,25 @@ export default function NewCampaignForm() {
   const [caption, setCaption] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState<number[]>([]);
+  const [mode, setMode] = useState<Mode>("manual");
+  const [when, setWhen] = useState("");
+  const [accountIds, setAccountIds] = useState<string[]>(
+    accounts.length === 1 ? [accounts[0].id] : []
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const kinds: ("image" | "video")[] = files.map((f) =>
+    f.type.startsWith("video/") ? "video" : "image"
+  );
+  const eligible = platforms.filter((p) => accountPlatformOf(p) !== null);
+  const issues =
+    mode === "manual" || files.length === 0
+      ? []
+      : eligible.flatMap((p) => {
+          const msg = checkPostable(p, kinds);
+          return msg ? [`${PLATFORM_INFO[p].label}: ${msg}`] : [];
+        });
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? []);
@@ -82,6 +103,20 @@ export default function NewCampaignForm() {
     const problem = validateFiles(files);
     if (problem) return setError(problem);
 
+    if (mode !== "manual") {
+      if (eligible.length === 0) {
+        return setError(
+          "Automatic posting only works for Instagram so far. Choose an Instagram version, or pick “Review first”."
+        );
+      }
+      if (accountIds.length === 0) return setError("Choose the account to post to.");
+      if (mode === "scheduled") {
+        const d = new Date(when);
+        if (!when || Number.isNaN(d.getTime())) return setError("Pick a date and time.");
+        if (d.getTime() < Date.now() + 60_000) return setError("Pick a time in the future.");
+      }
+    }
+
     setBusy(true);
     setProgress(files.map(() => 0));
     try {
@@ -90,7 +125,11 @@ export default function NewCampaignForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           caption: request,
+          notes: caption.trim(),
           platforms,
+          publishMode: mode,
+          publishAt: mode === "scheduled" ? new Date(when).toISOString() : null,
+          accountIds: mode === "manual" ? [] : accountIds,
           files: files.map((f) => ({ name: f.name, type: f.type, size: f.size })),
         }),
       });
@@ -115,7 +154,7 @@ export default function NewCampaignForm() {
         throw new Error(subData.error ?? "Could not submit");
       }
 
-      router.push("/dashboard");
+      router.push("/genie/campaigns");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -210,6 +249,71 @@ export default function NewCampaignForm() {
         onChange={(e) => setCaption(e.target.value)}
         placeholder="e.g. Focus on the two dogs on the right, for our summer sale"
       />
+
+      <label>6. When should it go out?</label>
+      <div className="checks">
+        <label>
+          <input type="radio" disabled={busy} checked={mode === "manual"} onChange={() => setMode("manual")} />
+          Review first, post later
+        </label>
+        <label>
+          <input type="radio" disabled={busy} checked={mode === "now"} onChange={() => setMode("now")} />
+          Post as soon as it's ready
+        </label>
+        <label>
+          <input type="radio" disabled={busy} checked={mode === "scheduled"} onChange={() => setMode("scheduled")} />
+          Schedule
+          <input
+            type="datetime-local"
+            value={when}
+            disabled={busy || mode !== "scheduled"}
+            onChange={(e) => setWhen(e.target.value)}
+            style={{ marginLeft: 8 }}
+          />
+        </label>
+      </div>
+
+      {mode !== "manual" && (
+        <>
+          {accounts.length === 0 ? (
+            <p>
+              <small>
+                No account connected yet. <Link href="/genie/accounts">Connect Instagram</Link>, then
+                come back.
+              </small>
+            </p>
+          ) : (
+            <>
+              <label>Post to</label>
+              <div className="checks">
+                {accounts.map((a) => (
+                  <label key={a.id}>
+                    <input
+                      type="checkbox"
+                      disabled={busy}
+                      checked={accountIds.includes(a.id)}
+                      onChange={() => setAccountIds((cur) => toggle(cur, a.id))}
+                    />
+                    @{a.username ?? "instagram"} <small>({a.platform})</small>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+          <p style={{ margin: 0 }}>
+            <small>
+              Genie posts the text it writes without you checking it first. Scheduled posts can be
+              edited or cancelled before they go out. Only Instagram versions are posted
+              automatically so far. Posts go out while Genie's worker is running.
+            </small>
+          </p>
+          {issues.map((m) => (
+            <p key={m} className="error" style={{ margin: 0 }}>
+              <small>Can't be posted automatically. {m}</small>
+            </p>
+          ))}
+        </>
+      )}
 
       {error && <p className="error">{error}</p>}
       <button className="btn" type="submit" disabled={busy}>
