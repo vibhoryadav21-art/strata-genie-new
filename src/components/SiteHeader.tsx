@@ -20,7 +20,13 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-export default function SiteHeader({ loggedIn }: { loggedIn: boolean }) {
+export default function SiteHeader({
+  loggedIn,
+  isAdmin,
+}: {
+  loggedIn: boolean;
+  isAdmin: boolean;
+}) {
   const pathname = usePathname() ?? "";
   const router = useRouter();
   const inStrata = pathname === "/strata" || pathname.startsWith("/strata/");
@@ -63,9 +69,12 @@ export default function SiteHeader({ loggedIn }: { loggedIn: boolean }) {
 
       <div className="site-actions">
         {loggedIn ? (
-          <button type="button" onClick={logout}>
-            Log out
-          </button>
+          <>
+            {isAdmin && <Link href="/admin">Admin</Link>}
+            <button type="button" onClick={logout}>
+              Log out
+            </button>
+          </>
         ) : (
           <>
             <Link href="/strata/genie/login">Log in</Link>

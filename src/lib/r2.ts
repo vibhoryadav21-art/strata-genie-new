@@ -80,3 +80,29 @@ export async function deletePrefix(prefix: string): Promise<number> {
   } while (token);
   return deleted;
 }
+
+// Deletes every file of one user ("userid/"). Used when an admin deletes a user.
+export async function deleteUserFolder(userId: string): Promise<number> {
+  if (!/^[0-9a-f-]{36}$/.test(userId)) {
+    throw new Error("Refusing to delete: unexpected user id");
+  }
+  const c = client();
+  const Bucket = process.env.R2_BUCKET!;
+  const prefix = `${userId}/`;
+  let token: string | undefined;
+  let deleted = 0;
+  do {
+    const list = await c.send(
+      new ListObjectsV2Command({ Bucket, Prefix: prefix, ContinuationToken: token })
+    );
+    const keys = (list.Contents ?? []).map((o) => o.Key).filter((k): k is string => !!k);
+    for (let i = 0; i < keys.length; i += 10) {
+      await Promise.all(
+        keys.slice(i, i + 10).map((Key) => c.send(new DeleteObjectCommand({ Bucket, Key })))
+      );
+    }
+    deleted += keys.length;
+    token = list.IsTruncated ? list.NextContinuationToken : undefined;
+  } while (token);
+  return deleted;
+}
