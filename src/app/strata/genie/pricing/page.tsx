@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export const metadata = { title: "Pricing" };
 
-const MAIL = "mailto:hello@example.com?subject="; // replace with your real address
+const MAIL = "mailto:contact@whitecloaklabs.com?subject="; // replace with your real address
 
 export default async function Pricing() {
   const supabase = await createClient();

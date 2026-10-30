@@ -134,3 +134,11 @@ a.btn.small.secondary { border: 1px solid #111; }
 @media (max-width: 700px) {
   .band { padding: 48px 20px; }
 }
+
+.legal { max-width: 760px; }
+.legal h2 { margin-top: 32px; font-size: 1.2rem; }
+.legal li { margin-bottom: 6px; }
+.legal a { text-decoration: underline; }
+.footer-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 20px; margin-bottom: 10px; }
+.footer-links a { color: #666; text-decoration: none; }
+.footer-links a:hover { color: #111; text-decoration: underline; }

@@ -7,6 +7,11 @@
  * https://developers.cloudflare.com/workers/wrangler/configuration/
  */
 {
+"routes": [
+    { "pattern": "whitecloaklabs.com", "custom_domain": true },
+    { "pattern": "www.whitecloaklabs.com", "custom_domain": true }
+  ],
+  "workers_dev": true,
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "strata-genie",
 	"main": ".open-next/worker.js",
