@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireAdmin, one } from "@/lib/admin";
 import ActionButton from "@/components/ActionButton";
 import LocalTime from "@/components/LocalTime";
+import { fmtInt, fmtSec, fmtUsd, num } from "@/lib/usage";
 
 export const metadata = { title: "Admin · Campaigns" };
 
@@ -27,9 +28,13 @@ export default async function AdminCampaigns({
   else if (current !== "all") query = query.eq("status", current);
   const { data: campaigns } = await query;
 
-  // Latest job per campaign, to show the last error
   const ids = (campaigns ?? []).map((c) => c.id);
+
+  // Latest job per campaign, to show the last error
   const jobByCampaign = new Map<string, JobLite>();
+  // Cost and time per campaign
+  const usageByCampaign = new Map<string, { neurons: number; cost: number; seconds: number }>();
+
   if (ids.length > 0) {
     const { data: jobs } = await supabase
       .from("jobs")
@@ -38,6 +43,20 @@ export default async function AdminCampaigns({
       .order("created_at", { ascending: false });
     for (const j of (jobs ?? []) as JobLite[]) {
       if (!jobByCampaign.has(j.campaign_id)) jobByCampaign.set(j.campaign_id, j);
+    }
+
+    const { data: events } = await supabase
+      .from("usage_events")
+      .select("campaign_id, kind, neurons_est, cost_usd_est, seconds")
+      .in("campaign_id", ids)
+      .limit(5000);
+    for (const e of events ?? []) {
+      if (!e.campaign_id) continue;
+      const cur = usageByCampaign.get(e.campaign_id) ?? { neurons: 0, cost: 0, seconds: 0 };
+      cur.neurons += num(e.neurons_est);
+      cur.cost += num(e.cost_usd_est);
+      if (e.kind === "processing") cur.seconds += num(e.seconds);
+      usageByCampaign.set(e.campaign_id, cur);
     }
   }
 
@@ -65,6 +84,8 @@ export default async function AdminCampaigns({
               <th>User</th>
               <th>Request</th>
               <th>Status</th>
+              <th>AI (est.)</th>
+              <th>Time</th>
               <th>Last problem</th>
               <th>Actions</th>
             </tr>
@@ -73,20 +94,31 @@ export default async function AdminCampaigns({
             {(campaigns ?? []).map((c) => {
               const owner = one(c.profiles as { email: string }[] | null);
               const job = jobByCampaign.get(c.id);
+              const u = usageByCampaign.get(c.id);
               return (
                 <tr key={c.id}>
                   <td>
                     <LocalTime iso={c.created_at} />
                   </td>
                   <td>{owner?.email ?? "?"}</td>
-                  <td style={{ maxWidth: 320 }}>
+                  <td style={{ maxWidth: 300 }}>
                     <Link href={`/admin/campaigns/${c.id}`}>{c.caption_input}</Link>
                   </td>
                   <td>
                     {c.status}
-                    {c.ai_note && <div className="error"><small>AI step failed</small></div>}
+                    {c.ai_note && (
+                      <div className="error">
+                        <small>AI step failed</small>
+                      </div>
+                    )}
                   </td>
-                  <td style={{ maxWidth: 280 }}>
+                  <td>
+                    {u && (u.neurons || u.cost)
+                      ? `${u.neurons ? fmtInt(u.neurons) + " N · " : ""}${fmtUsd(u.cost)}`
+                      : "—"}
+                  </td>
+                  <td>{u && u.seconds ? fmtSec(u.seconds) : "—"}</td>
+                  <td style={{ maxWidth: 260 }}>
                     {job?.error ? <small className="error">{job.error.slice(0, 160)}</small> : "—"}
                   </td>
                   <td>

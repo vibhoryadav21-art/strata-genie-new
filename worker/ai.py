@@ -223,8 +223,56 @@ def make_contact_sheet(previews: list[tuple[int, bytes]], max_tiles: int = 9,
     return buf.getvalue()
 
 
+# ---- Cost estimates -------------------------------------------------------
+# Estimated list prices in US dollars per million tokens: (input, output).
+# Check the providers' price pages and update this when they change.
+PRICES = {
+    ("cloudflare", "@cf/mistralai/mistral-small-3.1-24b-instruct"): (0.351, 0.555),
+    ("gemini", "*"): (0.75, 3.75),
+}
+NEURON_USD = 0.011 / 1000  # Cloudflare: $0.011 per 1,000 Neurons
+
+
+def model_for(provider: str) -> str:
+    if provider == "gemini":
+        return os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+    return os.environ.get("CLOUDFLARE_AI_MODEL", "@cf/mistralai/mistral-small-3.1-24b-instruct")
+
+
+def _price(provider: str, model: str):
+    return PRICES.get((provider, model)) or PRICES.get((provider, "*"))
+
+
+def make_event(provider: str, model: str, usage: dict | None, seconds: float,
+               ok: bool, error: str | None = None) -> dict:
+    """One usage record for one AI call (successful or not)."""
+    usage = usage or {}
+    prompt = usage.get("prompt_tokens")
+    completion = usage.get("completion_tokens")
+    thinking = usage.get("thinking_tokens") or 0
+    cost = None
+    price = _price(provider, model)
+    if ok and price and prompt is not None and completion is not None:
+        cost = (prompt * price[0] + (completion + thinking) * price[1]) / 1_000_000
+    neurons = cost / NEURON_USD if (cost is not None and provider == "cloudflare") else None
+    return {
+        "kind": "ai",
+        "provider": provider,
+        "model": model,
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "thinking_tokens": thinking or None,
+        "neurons_est": round(neurons, 1) if neurons is not None else None,
+        "cost_usd_est": round(cost, 6) if cost is not None else None,
+        "seconds": round(seconds, 2),
+        "ok": ok,
+        "error": error,
+        "detail": {"tokens_estimated": True} if usage.get("estimated") else None,
+    }
+
+
 # ---- Provider 1: Google Gemini --------------------------------------------
-def _run_gemini(user_request, media_info, previews, platforms) -> GenieResult:
+def _run_gemini(user_request, media_info, previews, platforms) -> tuple[GenieResult, dict]:
     api_key = os.environ["GEMINI_API_KEY"]
     model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
     client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=120_000))
@@ -244,7 +292,13 @@ def _run_gemini(user_request, media_info, previews, platforms) -> GenieResult:
             temperature=0.7,
         ),
     )
-    return resp.parsed or GenieResult.model_validate_json(resp.text)
+    meta = getattr(resp, "usage_metadata", None)
+    usage = {
+        "prompt_tokens": getattr(meta, "prompt_token_count", None),
+        "completion_tokens": getattr(meta, "candidates_token_count", None),
+        "thinking_tokens": getattr(meta, "thoughts_token_count", None),
+    }
+    return (resp.parsed or GenieResult.model_validate_json(resp.text)), usage
 
 
 # ---- Provider 2: Cloudflare Workers AI ------------------------------------
@@ -262,7 +316,7 @@ def _cf_json_from_text(text: str) -> dict:
         raise AIError(f"Cloudflare AI gave broken JSON: {e}", True, shape=True) from e
 
 
-def _cf_call(url: str, token: str, payload: dict) -> GenieResult:
+def _cf_call(url: str, token: str, payload: dict) -> tuple[GenieResult, dict]:
     r = httpx.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=120)
     try:
         data = r.json()
@@ -292,15 +346,21 @@ def _cf_call(url: str, token: str, payload: dict) -> GenieResult:
         raw = _cf_json_from_text(raw)
     if not isinstance(raw, dict):
         raise AIError("Cloudflare AI returned no answer", True, shape=True)
+
+    u = result.get("usage") or {}
+    usage = {
+        "prompt_tokens": u.get("prompt_tokens", u.get("input_tokens")),
+        "completion_tokens": u.get("completion_tokens", u.get("output_tokens")),
+    }
     try:
-        return GenieResult.model_validate(raw)
+        return GenieResult.model_validate(raw), usage
     except ValidationError as e:
         raise AIError(
             f"Cloudflare AI answer had the wrong structure: {str(e)[:200]}", True, shape=True
         ) from e
 
 
-def _run_cloudflare(user_request, media_info, previews, platforms) -> GenieResult:
+def _run_cloudflare(user_request, media_info, previews, platforms) -> tuple[GenieResult, dict]:
     token = os.environ["CLOUDFLARE_AI_TOKEN"]
     account = os.environ["R2_ACCOUNT_ID"]
     model = os.environ.get("CLOUDFLARE_AI_MODEL", "@cf/mistralai/mistral-small-3.1-24b-instruct")
@@ -343,9 +403,16 @@ def _run_cloudflare(user_request, media_info, previews, platforms) -> GenieResul
     last: AIError | None = None
     for style in order:
         try:
-            result = _cf_call(url, token, payload(style))
+            result, usage = _cf_call(url, token, payload(style))
             _CF_STYLE[model] = style
-            return result
+            if usage.get("prompt_tokens") is None or usage.get("completion_tokens") is None:
+                # The API did not report tokens: estimate them from sizes (marked with "~")
+                usage = {
+                    "prompt_tokens": int(len(prompt) / 3.5) + (1500 if previews else 0),
+                    "completion_tokens": int(len(result.model_dump_json()) / 3.5),
+                    "estimated": True,
+                }
+            return result, usage
         except AIError as e:
             last = e
             if not e.shape:
@@ -354,6 +421,7 @@ def _run_cloudflare(user_request, media_info, previews, platforms) -> GenieResul
                      style, str(e)[:150])
     assert last is not None
     raise AIError(str(last), False)
+
 
 # ---- Choosing providers ---------------------------------------------------
 def configured_providers() -> list[str]:
@@ -367,7 +435,7 @@ def configured_providers() -> list[str]:
     return ready
 
 
-def run_provider(name: str, user_request, media_info, previews, platforms) -> GenieResult:
+def run_provider(name: str, user_request, media_info, previews, platforms) -> tuple[GenieResult, dict]:
     if name == "gemini":
         return _run_gemini(user_request, media_info, previews, platforms)
     if name == "cloudflare":
@@ -375,26 +443,38 @@ def run_provider(name: str, user_request, media_info, previews, platforms) -> Ge
     raise AIError(f"Unknown AI provider: {name}", False)
 
 
-def run_genie(user_request: str, media_info: list[dict],
-              previews: list[tuple[int, bytes]], platforms: list[str]) -> GenieResult:
+def run_genie(user_request: str, media_info: list[dict], previews: list[tuple[int, bytes]],
+              platforms: list[str], events: list | None = None) -> GenieResult:
+    """Tries each provider in order. Every attempt is added to `events` (cost and timing)."""
     providers = configured_providers()
     if not providers:
         raise RuntimeError("No AI provider is configured (set CLOUDFLARE_AI_TOKEN and/or GEMINI_API_KEY)")
 
     errors = []
     for name in providers:
+        model = model_for(name)
+
+        def attempt(name=name, model=model):
+            start = time.time()
+            try:
+                result, usage = run_provider(name, user_request, media_info, previews, platforms)
+            except Exception as e:
+                if events is not None:
+                    events.append(make_event(name, model, None, time.time() - start, False,
+                                             mask(str(e))[:300]))
+                raise
+            if events is not None:
+                events.append(make_event(name, model, usage, time.time() - start, True))
+            return result
+
         try:
-            result = _with_retries(
-                lambda: run_provider(name, user_request, media_info, previews, platforms), name
-            )
+            result = _with_retries(attempt, name)
             log.info("AI provider used: %s", name)
             return result
         except Exception as e:
             errors.append(f"{name}: {mask(str(e))[:200]}")
             log.warning("AI provider %s failed, trying the next one", name)
     raise RuntimeError("All AI providers failed. " + " | ".join(errors))
-
-
 # ---- Validation: never trust the AI's output ------------------------------
 def _num(value, lo: float, hi: float, default: float) -> float:
     try:

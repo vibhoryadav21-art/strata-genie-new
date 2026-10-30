@@ -28,7 +28,7 @@ for name in providers:
     print(f"\n--- testing {name} ---", flush=True)
     start = time.time()
     try:
-        result = ai.run_provider(
+        result, usage = ai.run_provider(
             name,
             "Look: warm and vibrant. Tone: fun and casual. A sunny day outdoors",
             [{"index": 0, "type": "image"}],
@@ -37,6 +37,7 @@ for name in providers:
         )
         plan, copy = ai.sanitize(result, 1, "", platforms)
         print(f"{name}: OK in {time.time() - start:.0f}s")
+        print("  tokens reported or estimated:", usage)
         if name == "cloudflare":
             print("  request style that worked (0=response_format, 1=guided_json, 2=prompt only):", ai._CF_STYLE)
         print("  edit:", {k: plan[k] for k in ("saturation", "contrast", "grayscale", "zoom")},

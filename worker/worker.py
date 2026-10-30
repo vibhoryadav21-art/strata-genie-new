@@ -175,6 +175,28 @@ def claim_job() -> dict | None:
     return res.data or None
 
 
+EVENT_COLUMNS = (
+    "kind", "provider", "model", "prompt_tokens", "completion_tokens", "thinking_tokens",
+    "neurons_est", "cost_usd_est", "seconds", "ok", "error", "detail",
+)
+
+
+def record_events(events: list[dict], campaign_id: str, user_id: str) -> None:
+    """Saves cost and timing records. Never raises: a logging problem must not fail a job."""
+    if not events:
+        return
+    try:
+        rows = []
+        for e in events:
+            row = {k: e.get(k) for k in EVENT_COLUMNS}
+            row["ok"] = bool(e.get("ok", True))
+            row["campaign_id"] = campaign_id
+            row["user_id"] = user_id
+            rows.append(row)
+        sb.table("usage_events").insert(rows).execute()
+    except Exception:
+        log.exception("Could not save usage records")
+
 def check_postable(platform: str, kinds: list[str]) -> str | None:
     if platform == "instagram_reels" and (len(kinds) != 1 or kinds[0] != "video"):
         return "Instagram Reels need exactly one video."
@@ -226,6 +248,7 @@ def queue_auto_posts(campaign: dict, user_id: str, outputs: list[dict]) -> None:
 
 
 def handle_job(job: dict) -> None:
+    t_start = time.time()
     campaign_id = job["campaign_id"]
     user_id = job["user_id"]
 
@@ -255,32 +278,45 @@ def handle_job(job: dict) -> None:
 
     results: dict[str, list[str]] = {fmt: [] for fmt in formats}
     ai_note: str | None = None
+    timings = {"download": 0.0, "previews": 0.0, "ai": 0.0, "process": 0.0, "upload": 0.0}
+    events: list[dict] = []
+    in_bytes = out_bytes = 0
 
     with tempfile.TemporaryDirectory() as tmp_name:
         tmp = Path(tmp_name)
 
         # 1. Download everything
+        t0 = time.time()
         local: list[Path] = []
         for i, asset in enumerate(assets):
             src = tmp / f"in_{i}{Path(asset['storage_key']).suffix}"
             log.info("Downloading %s", asset["storage_key"])
             s3.download_file(BUCKET, asset["storage_key"], str(src))
+            in_bytes += src.stat().st_size
             local.append(src)
+        timings["download"] = time.time() - t0
 
         # 2. Ask the AI for an edit plan, captions and tags
+        t0 = time.time()
         media_info, previews = build_previews(assets, local, tmp)
+        timings["previews"] = time.time() - t0
+
+        t0 = time.time()
         try:
-            result = ai.run_genie(job["caption_input"], media_info, previews, platforms)
+            result = ai.run_genie(job["caption_input"], media_info, previews, platforms, events)
             plan, copy = ai.sanitize(result, len(assets), notes, platforms)
             log.info("AI plan: %s", plan)
         except Exception as e:
             message = str(e)
-            key = os.environ.get("GEMINI_API_KEY")
-            if key:
-                message = message.replace(key, "***")
+            for secret in (os.environ.get("GEMINI_API_KEY"), os.environ.get("CLOUDFLARE_AI_TOKEN")):
+                if secret:
+                    message = message.replace(secret, "***")
             log.warning("AI step failed (%s). Using basic defaults.", message)
             ai_note = message[:300]
             plan, copy = ai.fallback(notes, platforms)
+        timings["ai"] = time.time() - t0
+        record_events(events, campaign_id, user_id)  # saved now, even if a later step fails
+        events.clear()
 
         # 3. Process every file into every needed format
         for i, (asset, src) in enumerate(zip(assets, local)):
@@ -292,9 +328,15 @@ def handle_job(job: dict) -> None:
             for fmt in formats:
                 dst = tmp / f"out_{fmt}_{i}.{ext}"
                 log.info("Processing item %d as %s", i, fmt)
+                t0 = time.time()
                 (process_image if is_image else process_video)(src, dst, FORMATS[fmt], plan, focus)
+                timings["process"] += time.time() - t0
+                out_bytes += dst.stat().st_size
+
                 key_out = f"{user_id}/{campaign_id}/out/{fmt}-{i}.{ext}"
+                t0 = time.time()
                 s3.upload_file(str(dst), BUCKET, key_out, ExtraArgs={"ContentType": content_type})
+                timings["upload"] += time.time() - t0
                 results[fmt].append(key_out)
                 dst.unlink()
 
@@ -324,6 +366,22 @@ def handle_job(job: dict) -> None:
 
     sb.table("campaigns").update({"status": "ready", "ai_note": ai_note}).eq("id", campaign_id).execute()
     sb.table("jobs").update({"status": "done", "error": None}).eq("id", job["job_id"]).execute()
+
+    # 6. How long did all this take on this machine?
+    record_events([{
+        "kind": "processing",
+        "provider": "worker",
+        "seconds": round(time.time() - t_start, 2),
+        "ok": True,
+        "detail": {
+            **{f"{k}_s": round(v, 1) for k, v in timings.items()},
+            "images": sum(1 for a in assets if a["type"] == "image"),
+            "videos": sum(1 for a in assets if a["type"] == "video"),
+            "formats": formats,
+            "input_mb": round(in_bytes / 1_048_576, 1),
+            "output_mb": round(out_bytes / 1_048_576, 1),
+        },
+    }], campaign_id, user_id)
 
 def fail_job(job: dict, message: str) -> None:
     final = job["attempts"] >= MAX_ATTEMPTS
@@ -415,25 +473,32 @@ def process_next_post() -> bool:
 
 def process_next_job() -> bool:
     job = None
+    started = time.time()
     try:
         job = claim_job()
         if job is None:
             return False
         log.info("Claimed job %s (attempt %s)", job["job_id"], job["attempts"])
+        started = time.time()
         handle_job(job)
         log.info("Finished job %s", job["job_id"])
         return True
     except Exception as e:
         log.exception("Job failed")
         if job:
+            record_events([{
+                "kind": "processing",
+                "provider": "worker",
+                "seconds": round(time.time() - started, 2),
+                "ok": False,
+                "error": str(e)[:300],
+            }], job["campaign_id"], job["user_id"])
             try:
                 fail_job(job, str(e))
             except Exception:
                 log.exception("Could not record the failure")
             return True
         return False
-
-
 def main() -> None:
     if os.environ.get("GEMINI_API_KEY"):
         log.info("AI enabled (model: %s)", os.environ.get("GEMINI_MODEL", "gemini-flash-latest"))

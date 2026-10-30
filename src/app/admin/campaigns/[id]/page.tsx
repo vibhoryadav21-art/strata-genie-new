@@ -6,6 +6,7 @@ import { presignView } from "@/lib/r2";
 import { kindOf } from "@/lib/platforms";
 import ActionButton from "@/components/ActionButton";
 import LocalTime from "@/components/LocalTime";
+import { type UsageEvent, detailText, fmtInt, fmtSec, fmtUsd, num } from "@/lib/usage";
 
 export const metadata = { title: "Admin · Campaign" };
 
@@ -180,7 +181,7 @@ export default async function AdminCampaign({ params }: { params: Promise<{ id: 
           </table>
         </div>
       )}
-
+      <UsageSection campaignId={campaign.id} />
       <h2 style={{ marginTop: 32 }}>Processing history</h2>
       <div className="table-wrap">
         <table className="table">
@@ -207,5 +208,88 @@ export default async function AdminCampaign({ params }: { params: Promise<{ id: 
         </table>
       </div>
     </main>
+  );
+}
+
+async function UsageSection({ campaignId }: { campaignId: string }) {
+  const { supabase } = await requireAdmin();
+  const { data } = await supabase
+    .from("usage_events")
+    .select("*")
+    .eq("campaign_id", campaignId)
+    .order("created_at", { ascending: false });
+  const usage = (data ?? []) as UsageEvent[];
+
+  const neurons = usage.reduce((s, e) => s + num(e.neurons_est), 0);
+  const cost = usage.reduce((s, e) => s + num(e.cost_usd_est), 0);
+  const seconds = usage
+    .filter((e) => e.kind === "processing")
+    .reduce((s, e) => s + num(e.seconds), 0);
+
+  return (
+    <>
+      <h2 style={{ marginTop: 32 }}>Usage and cost</h2>
+      {usage.length === 0 ? (
+        <p>Nothing recorded (campaigns processed before usage tracking have no records).</p>
+      ) : (
+        <>
+          <p>
+            Total: {neurons ? `${fmtInt(neurons)} Neurons · ` : ""}
+            {fmtUsd(cost)} estimated · {seconds ? fmtSec(seconds) : "—"} processing time
+          </p>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>What</th>
+                  <th>Provider · model</th>
+                  <th>Tokens in / out</th>
+                  <th>Neurons</th>
+                  <th>Est. cost</th>
+                  <th>Time</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.map((e) => {
+                  const estimated = e.detail && (e.detail as Record<string, unknown>).tokens_estimated;
+                  return (
+                    <tr key={e.id}>
+                      <td>{new Date(e.created_at).toLocaleString()}</td>
+                      <td>{e.kind === "ai" ? "AI call" : "Processing"}</td>
+                      <td>
+                        {e.provider}
+                        {e.model ? ` · ${e.model}` : ""}
+                      </td>
+                      <td>
+                        {e.prompt_tokens !== null
+                          ? `${estimated ? "~" : ""}${fmtInt(num(e.prompt_tokens))} / ${fmtInt(
+                              num(e.completion_tokens) + num(e.thinking_tokens)
+                            )}`
+                          : "—"}
+                      </td>
+                      <td>{e.neurons_est ? fmtInt(num(e.neurons_est)) : "—"}</td>
+                      <td>{e.cost_usd_est !== null ? fmtUsd(num(e.cost_usd_est)) : "—"}</td>
+                      <td>
+                        {e.seconds !== null ? fmtSec(num(e.seconds)) : "—"}
+                        {e.kind === "processing" && e.detail && (
+                          <div>
+                            <small>{detailText(e.detail)}</small>
+                          </div>
+                        )}
+                      </td>
+                      <td className={e.ok ? "" : "error"}>
+                        {e.ok ? "ok" : <small>{e.error}</small>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </>
   );
 }
