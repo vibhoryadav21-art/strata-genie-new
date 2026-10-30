@@ -28,7 +28,7 @@ export default function PublishControls({
     return (
       <p>
         <small>
-          No account connected yet. <Link href="/genie/accounts">Connect one</Link> to post directly.
+          No account connected yet. <Link href="/strata/genie/accounts">Connect one</Link> to post directly.
         </small>
       </p>
     );

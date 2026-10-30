@@ -1,35 +1,47 @@
-import os
+import io
+import time
 
 from dotenv import load_dotenv
 
 load_dotenv()
-from google import genai
-from google.genai import types
+from PIL import Image, ImageDraw
 import ai
 
-key = os.environ.get("GEMINI_API_KEY")
-model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
-print("key set:", bool(key), "| model:", model)
 
-client = genai.Client(api_key=key)
-try:
-    r = client.models.generate_content(model=model, contents="Reply with the single word: ready")
-    print("1. basic call OK:", r.text.strip())
-except Exception as e:
-    print("1. basic call FAILED:", type(e).__name__, str(e).replace(key or "", "***")[:600])
-    raise SystemExit(1)
+def sample_preview() -> bytes:
+    img = Image.new("RGB", (768, 576), (120, 170, 220))   # sky
+    d = ImageDraw.Draw(img)
+    d.rectangle((0, 400, 768, 576), fill=(80, 140, 70))    # grass
+    d.ellipse((520, 60, 640, 180), fill=(255, 210, 60))    # sun
+    d.ellipse((250, 300, 450, 420), fill=(230, 140, 60))   # orange body
+    d.ellipse((380, 250, 480, 340), fill=(230, 140, 60))   # head
+    buf = io.BytesIO()
+    img.save(buf, "JPEG")
+    return buf.getvalue()
 
-try:
-    r = client.models.generate_content(
-        model=model,
-        contents=ai.build_prompt("Look: warm and vibrant. Tone: fun and casual. cute cat",
-                                 [{"index": 0, "type": "image"}], ["instagram_feed", "x"]),
-        config=types.GenerateContentConfig(
-            system_instruction=ai.SYSTEM,
-            response_mime_type="application/json",
-            response_schema=ai.GenieResult,
-        ),
-    )
-    print("2. structured call OK. Instagram caption:", r.parsed.posts[0].caption[:120])
-except Exception as e:
-    print("2. structured call FAILED:", type(e).__name__, str(e).replace(key or "", "***")[:600])
+
+providers = ai.configured_providers()
+print("providers in order:", providers or "NONE configured", flush=True)
+
+platforms = ["instagram_feed", "x"]
+for name in providers:
+    print(f"\n--- testing {name} ---", flush=True)
+    start = time.time()
+    try:
+        result = ai.run_provider(
+            name,
+            "Look: warm and vibrant. Tone: fun and casual. A sunny day outdoors",
+            [{"index": 0, "type": "image"}],
+            [(0, sample_preview())],
+            platforms,
+        )
+        plan, copy = ai.sanitize(result, 1, "", platforms)
+        print(f"{name}: OK in {time.time() - start:.0f}s")
+        if name == "cloudflare":
+            print("  request style that worked (0=response_format, 1=guided_json, 2=prompt only):", ai._CF_STYLE)
+        print("  edit:", {k: plan[k] for k in ("saturation", "contrast", "grayscale", "zoom")},
+              "focus:", plan["focus"])
+        for pid, c in copy.items():
+            print(f"  {pid}: {c['caption'][:110]!r}  tags={c['tags']}")
+    except Exception as e:
+        print(f"{name}: FAILED after {time.time() - start:.0f}s: {ai.mask(str(e))[:700]}")

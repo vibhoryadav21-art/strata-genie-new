@@ -13,7 +13,7 @@ export default async function Accounts({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/genie/login");
+  if (!user) redirect("/strata/genie/login");
 
   const { data: accounts } = await supabase
     .from("social_accounts")
@@ -23,7 +23,7 @@ export default async function Accounts({
   return (
     <main className="container">
       <p>
-        <Link href="/genie/campaigns">← Back to dashboard</Link>
+        <Link href="/strata/genie/campaigns">← Back to dashboard</Link>
       </p>
       <h1>Connected accounts</h1>
 

@@ -21,19 +21,19 @@ export default async function GenieOverview() {
           <div className="hero-actions">
             {user ? (
               <>
-                <Link href="/genie/campaigns/new" className="btn light">
+                <Link href="/strata/genie/campaigns/new" className="btn light">
                   New campaign
                 </Link>
-                <Link href="/genie/campaigns" className="btn ghost">
+                <Link href="/strata/genie/campaigns" className="btn ghost">
                   My campaigns
                 </Link>
               </>
             ) : (
               <>
-                <Link href="/genie/pricing" className="btn light">
+                <Link href="/strata/genie/pricing" className="btn light">
                   Subscribe
                 </Link>
-                <Link href="/genie/signup?plan=trial" className="btn ghost">
+                <Link href="/strata/genie/signup?plan=trial" className="btn ghost">
                   Start free trial
                 </Link>
               </>

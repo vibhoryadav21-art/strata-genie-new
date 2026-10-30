@@ -10,7 +10,7 @@ export default function GenieTabs({ tabs }: { tabs: Tab[] }) {
     <div className="genie-tabs">
       <nav>
         {tabs.map((t) => {
-          const active = t.href === "/genie" ? pathname === "/genie" : pathname.startsWith(t.href);
+          const active = t.href === "/strata/genie" ? pathname === "/strata/genie" : pathname.startsWith(t.href);
           return (
             <Link key={t.href} href={t.href} className={active ? "active" : ""}>
               {t.label}

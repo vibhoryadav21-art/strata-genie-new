@@ -3,9 +3,9 @@ import SiteHeader from "@/components/SiteHeader";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata = {
-  title: { default: "STRATA", template: "%s · STRATA" },
+  title: { default: "WhiteCloak Labs", template: "%s · WhiteCloak Labs" },
   description:
-    "STRATA builds focused software products. Genie turns photos and videos into ready-to-post social content.",
+    "WhiteCloak Labs is a non-profit initiative working on end-to-end security, making communities digitally safe and empowering youth.",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -19,7 +19,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <SiteHeader loggedIn={!!user} />
         {children}
-        <footer>© {new Date().getFullYear()} STRATA. All rights reserved.</footer>
+        <footer>
+          © {new Date().getFullYear()} WhiteCloak Labs. STRATA is a product of WhiteCloak Labs.
+        </footer>
       </body>
     </html>
   );

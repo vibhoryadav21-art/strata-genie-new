@@ -154,7 +154,7 @@ export default function NewCampaignForm({ accounts }: { accounts: Account[] }) {
         throw new Error(subData.error ?? "Could not submit");
       }
 
-      router.push("/genie/campaigns");
+      router.push("/strata/genie/campaigns");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -278,7 +278,7 @@ export default function NewCampaignForm({ accounts }: { accounts: Account[] }) {
           {accounts.length === 0 ? (
             <p>
               <small>
-                No account connected yet. <Link href="/genie/accounts">Connect Instagram</Link>, then
+                No account connected yet. <Link href="/strata/genie/accounts">Connect Instagram</Link>, then
                 come back.
               </small>
             </p>

@@ -8,12 +8,12 @@ export default async function GenieLayout({ children }: { children: React.ReactN
   } = await supabase.auth.getUser();
 
   const tabs: Tab[] = [
-    { href: "/genie", label: "Overview" },
-    { href: "/genie/pricing", label: "Pricing" },
+    { href: "/strata/genie", label: "Overview" },
+    { href: "/strata/genie/pricing", label: "Pricing" },
     ...(user
       ? [
-          { href: "/genie/campaigns", label: "Campaigns" },
-          { href: "/genie/accounts", label: "Connected accounts" },
+          { href: "/strata/genie/campaigns", label: "Campaigns" },
+          { href: "/strata/genie/accounts", label: "Connected accounts" },
         ]
       : []),
   ];

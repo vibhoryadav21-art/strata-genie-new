@@ -7,7 +7,7 @@ export async function GET(request: Request) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.redirect(`${origin}/genie/login`);
+  if (!user) return NextResponse.redirect(`${origin}/strata/genie/login`);
 
   const state = crypto.randomUUID(); // protects against forged callbacks
   const params = new URLSearchParams({

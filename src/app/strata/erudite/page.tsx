@@ -10,7 +10,7 @@ export default function Erudite() {
           <h1>Erudite</h1>
           <p className="lead">Coming soon.</p>
           <div className="hero-actions">
-            <Link href="/genie" className="btn ghost">
+            <Link href="/strata/genie" className="btn ghost">
               See Genie
             </Link>
           </div>

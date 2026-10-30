@@ -18,7 +18,7 @@ export default async function Campaigns() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/genie/login");
+  if (!user) redirect("/strata/genie/login");
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -85,7 +85,7 @@ export default async function Campaigns() {
           {status.limit !== null ? ` / ${status.limit}` : " (unlimited)"}
         </p>
         {status.canPost ? (
-          <Link href="/genie/campaigns/new" className="btn">
+          <Link href="/strata/genie/campaigns/new" className="btn">
             New campaign
           </Link>
         ) : (
@@ -128,7 +128,7 @@ export default async function Campaigns() {
                 <tr key={c.id}>
                   <td>{new Date(c.created_at).toLocaleDateString()}</td>
                   <td>
-                    <Link href={`/genie/campaigns/${c.id}`}>{c.caption_input}</Link>
+                    <Link href={`/strata/genie/campaigns/${c.id}`}>{c.caption_input}</Link>
                   </td>
                   <td>{c.status}</td>
                   <td>
@@ -143,7 +143,7 @@ export default async function Campaigns() {
                   </td>
                   <td>
                     <div className="row-actions">
-                      <Link href={`/genie/campaigns/${c.id}`} className="btn small secondary">
+                      <Link href={`/strata/genie/campaigns/${c.id}`} className="btn small secondary">
                         Open
                       </Link>
                       {canPost && (

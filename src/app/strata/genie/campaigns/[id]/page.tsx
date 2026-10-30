@@ -48,7 +48,7 @@ export default async function CampaignPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/genie/login");
+  if (!user) redirect("/strata/genie/login");
 
   // Row Level Security: other people's campaigns simply aren't found.
   const { data: campaign } = await supabase
@@ -134,7 +134,7 @@ export default async function CampaignPage({
   return (
     <main className="container">
       <p>
-        <Link href="/genie/campaigns">← Back to dashboard</Link>
+        <Link href="/strata/genie/campaigns">← Back to dashboard</Link>
       </p>
       <h1>Your campaign</h1>
       <div className="card">

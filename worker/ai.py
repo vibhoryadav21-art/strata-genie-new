@@ -1,12 +1,17 @@
+import base64
+import io
+import json
 import logging
 import math
 import os
 import re
 import time
 
+import httpx
 from google import genai
 from google.genai import types
-from pydantic import BaseModel
+from PIL import Image, ImageDraw, ImageFont
+from pydantic import BaseModel, ValidationError
 
 log = logging.getLogger("ai")
 
@@ -56,6 +61,51 @@ class GenieResult(BaseModel):
     posts: list[PlatformPost]
 
 
+def _json_schema() -> dict:
+    """The same structure as GenieResult, as a plain JSON schema (no references)."""
+    return {
+        "type": "object",
+        "properties": {
+            "edit": {
+                "type": "object",
+                "properties": {
+                    "saturation": {"type": "number"},
+                    "contrast": {"type": "number"},
+                    "grayscale": {"type": "boolean"},
+                    "zoom": {"type": "number"},
+                    "trim_seconds": {"type": "number"},
+                    "assets": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "index": {"type": "integer"},
+                                "focus_x": {"type": "number"},
+                                "focus_y": {"type": "number"},
+                            },
+                            "required": ["index", "focus_x", "focus_y"],
+                        },
+                    },
+                },
+                "required": ["saturation", "contrast", "grayscale", "zoom", "trim_seconds", "assets"],
+            },
+            "posts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "platform": {"type": "string"},
+                        "caption": {"type": "string"},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["platform", "caption", "tags"],
+                },
+            },
+        },
+        "required": ["edit", "posts"],
+    }
+
+
 SYSTEM = (
     "You are Genie, an assistant that prepares photos and videos for social media. "
     "You receive a customer's request and preview images of their media. "
@@ -81,8 +131,8 @@ def build_prompt(user_request: str, media_info: list[dict], platforms: list[str]
         "centre, to zoom in, or to focus on a small subject. Otherwise 1.0",
         "- trim_seconds: 0 keeps whole videos; otherwise the maximum seconds to keep from the start of every video",
         "- for EVERY item give focus_x and focus_y between 0 and 1: the centre point of the main subject "
-        "(or the centre of the group of subjects the customer mentions). 0,0 = top-left, "
-        "1,1 = bottom-right, 0.5,0.5 = centre. The crop will be centred on this point.",
+        "(or the centre of the group of subjects the customer mentions) inside that item's own picture. "
+        "0,0 = top-left, 1,1 = bottom-right, 0.5,0.5 = centre. The crop will be centred on this point.",
         "",
         "Write one caption and a list of tags for each platform below:",
         "- First look carefully at the preview images. Base the text on what is actually visible in them, "
@@ -91,6 +141,7 @@ def build_prompt(user_request: str, media_info: list[dict], platforms: list[str]
         "- Tags must be relevant to the content: mix specific tags (what is in the pictures) with broader ones. "
         "Use at least half of the allowed number of tags for each platform, rounded up.",
         "- Follow the tone the customer asks for, and write in the language of the customer's request.",
+        "- The \"platform\" field must be exactly the platform id given below.",
         "Platforms:",
     ]
     for pid in platforms:
@@ -102,39 +153,246 @@ def build_prompt(user_request: str, media_info: list[dict], platforms: list[str]
     return "\n".join(lines)
 
 
-def run_genie(user_request: str, media_info: list[dict],
-              previews: list[tuple[int, bytes]], platforms: list[str]) -> GenieResult:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set")
+# ---- Errors and helpers ---------------------------------------------------
+class AIError(RuntimeError):
+    def __init__(self, message: str, transient: bool = True, shape: bool = False):
+        super().__init__(message)
+        self.transient = transient
+        self.shape = shape  # True = the request style or the answer format was the problem
+
+
+def mask(text: str) -> str:
+    """Hide secret keys in any message we log or print."""
+    for name in ("GEMINI_API_KEY", "CLOUDFLARE_AI_TOKEN"):
+        value = os.environ.get(name)
+        if value:
+            text = text.replace(value, "***")
+    return text
+
+
+def _is_transient(e: Exception) -> bool:
+    if isinstance(e, AIError):
+        return e.transient
+    code = getattr(e, "code", None)
+    msg = str(e).lower()
+    if code == 429 and ("per day" in msg or "perday" in msg):
+        return False  # daily quota: waiting won't help, try the next provider
+    if code is None:
+        return True  # timeouts, bad JSON and similar: worth another try
+    return code in (429, 500, 502, 503, 504)
+
+
+def _with_retries(fn, provider: str, attempts: int = 3, pauses: tuple = (8, 20)):
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as e:
+            last = e
+            log.warning("AI attempt %d with %s failed: %s", i + 1, provider, mask(str(e))[:300])
+            if not _is_transient(e) or i == attempts - 1:
+                break
+            time.sleep(pauses[min(i, len(pauses) - 1)])
+    assert last is not None
+    raise last
+
+
+def make_contact_sheet(previews: list[tuple[int, bytes]], max_tiles: int = 9,
+                       tile: int = 360, cols: int = 3) -> bytes:
+    """Combines the preview pictures into one labelled image, for models that read one image."""
+    tiles = previews[:max_tiles]
+    cols = min(cols, len(tiles))
+    rows = math.ceil(len(tiles) / cols)
+    sheet = Image.new("RGB", (cols * tile, rows * tile), (20, 20, 20))
+    try:
+        font = ImageFont.load_default(size=26)
+    except TypeError:
+        font = ImageFont.load_default()
+    draw = ImageDraw.Draw(sheet)
+    for k, (idx, data) in enumerate(tiles):
+        col, row = k % cols, k // cols
+        with Image.open(io.BytesIO(data)) as im:
+            im = im.convert("RGB")
+            im.thumbnail((tile - 8, tile - 8))
+            sheet.paste(im, (col * tile + (tile - im.width) // 2, row * tile + (tile - im.height) // 2))
+        x, y = col * tile + 8, row * tile + 8
+        draw.rectangle((x - 4, y - 2, x + 118, y + 32), fill=(0, 0, 0))
+        draw.text((x, y), f"item {idx}", fill=(255, 255, 255), font=font)
+    buf = io.BytesIO()
+    sheet.save(buf, "JPEG", quality=85)
+    return buf.getvalue()
+
+
+# ---- Provider 1: Google Gemini --------------------------------------------
+def _run_gemini(user_request, media_info, previews, platforms) -> GenieResult:
+    api_key = os.environ["GEMINI_API_KEY"]
     model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=120_000))
 
     contents: list = [build_prompt(user_request, media_info, platforms)]
     for idx, data in previews:
         contents.append(f"Preview from item {idx}:")
         contents.append(types.Part.from_bytes(data=data, mime_type="image/jpeg"))
 
-    last_error: Exception | None = None
-    for attempt in range(3):
+    resp = client.models.generate_content(
+        model=model,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM,
+            response_mime_type="application/json",
+            response_schema=GenieResult,
+            temperature=0.7,
+        ),
+    )
+    return resp.parsed or GenieResult.model_validate_json(resp.text)
+
+
+# ---- Provider 2: Cloudflare Workers AI ------------------------------------
+_CF_STYLE: dict[str, int] = {}  # remembers which request style worked for each model
+
+
+def _cf_json_from_text(text: str) -> dict:
+    text = (text or "").strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        raise AIError(f"Cloudflare AI gave an unreadable answer: {text[:200]!r}", True, shape=True)
+    try:
+        return json.loads(text[start : end + 1])
+    except json.JSONDecodeError as e:
+        raise AIError(f"Cloudflare AI gave broken JSON: {e}", True, shape=True) from e
+
+
+def _cf_call(url: str, token: str, payload: dict) -> GenieResult:
+    r = httpx.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload, timeout=120)
+    try:
+        data = r.json()
+    except ValueError:
+        data = {}
+
+    if r.status_code >= 400 or not data.get("success", True):
+        errors = data.get("errors") or []
+        msg = "; ".join(str(e.get("message", e)) if isinstance(e, dict) else str(e) for e in errors)
+        msg = msg or r.text[:300]
+        low = msg.lower()
+        if "daily free allocation" in low or "license" in low or "agree" in low:
+            raise AIError(f"Cloudflare AI {r.status_code}: {msg}", False)
+        if r.status_code in (401, 403):
+            raise AIError(f"Cloudflare AI {r.status_code}: {msg}", False)
+        shape = r.status_code in (400, 422) or "json mode" in low
+        transient = r.status_code in (429, 500, 502, 503, 504) or "capacity" in low
+        raise AIError(f"Cloudflare AI {r.status_code}: {msg}", transient, shape=shape)
+
+    result = data.get("result") or {}
+    raw = result.get("response")
+    if raw is None:  # some models answer in the OpenAI style
+        choices = result.get("choices") or []
+        if choices:
+            raw = (choices[0].get("message") or {}).get("content")
+    if isinstance(raw, str):
+        raw = _cf_json_from_text(raw)
+    if not isinstance(raw, dict):
+        raise AIError("Cloudflare AI returned no answer", True, shape=True)
+    try:
+        return GenieResult.model_validate(raw)
+    except ValidationError as e:
+        raise AIError(
+            f"Cloudflare AI answer had the wrong structure: {str(e)[:200]}", True, shape=True
+        ) from e
+
+
+def _run_cloudflare(user_request, media_info, previews, platforms) -> GenieResult:
+    token = os.environ["CLOUDFLARE_AI_TOKEN"]
+    account = os.environ["R2_ACCOUNT_ID"]
+    model = os.environ.get("CLOUDFLARE_AI_MODEL", "@cf/mistralai/mistral-small-3.1-24b-instruct")
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}"
+
+    schema = _json_schema()
+    prompt = build_prompt(user_request, media_info, platforms)
+    if previews:
+        prompt += (
+            "\n\nAll preview pictures are combined into ONE image. Each tile is labelled with its "
+            "item number. focus_x and focus_y refer to the position inside that item's own tile."
+        )
+    prompt += (
+        "\n\nRespond with ONLY one JSON object, no other text, in exactly this shape:\n"
+        + json.dumps(schema)
+    )
+
+    content: list = [{"type": "text", "text": prompt}]
+    if previews:
+        sheet = make_contact_sheet(previews)
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(sheet).decode()},
+        })
+    messages = [
+        {"role": "system", "content": SYSTEM},
+        {"role": "user", "content": content},
+    ]
+
+    def payload(style: int) -> dict:
+        body = {"messages": messages, "max_tokens": 1800, "temperature": 0.6}
+        if style == 0:
+            body["response_format"] = {"type": "json_schema", "json_schema": schema}
+        elif style == 1:
+            body["guided_json"] = schema
+        return body  # style 2: no schema option, the prompt alone asks for JSON
+
+    first = _CF_STYLE.get(model, 0)
+    order = [first] + [s for s in (0, 1, 2) if s != first]
+    last: AIError | None = None
+    for style in order:
         try:
-            resp = client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM,
-                    response_mime_type="application/json",
-                    response_schema=GenieResult,
-                    temperature=0.7,
-                ),
-            )
-            result = resp.parsed or GenieResult.model_validate_json(resp.text)
+            result = _cf_call(url, token, payload(style))
+            _CF_STYLE[model] = style
             return result
-        except Exception as e:  # rate limits, network, bad JSON...
-            last_error = e
-            log.warning("AI attempt %d failed: %s", attempt + 1, e)
-            time.sleep(20 * (attempt + 1))
-    raise RuntimeError(f"AI step failed after 3 attempts: {last_error}")
+        except AIError as e:
+            last = e
+            if not e.shape:
+                raise
+            log.info("Cloudflare request style %d did not work (%s). Trying the next style.",
+                     style, str(e)[:150])
+    assert last is not None
+    raise AIError(str(last), False)
+
+# ---- Choosing providers ---------------------------------------------------
+def configured_providers() -> list[str]:
+    wanted = [p.strip().lower() for p in os.environ.get("AI_PROVIDERS", "cloudflare,gemini").split(",")]
+    ready = []
+    for p in wanted:
+        if p == "gemini" and os.environ.get("GEMINI_API_KEY"):
+            ready.append(p)
+        elif p == "cloudflare" and os.environ.get("CLOUDFLARE_AI_TOKEN") and os.environ.get("R2_ACCOUNT_ID"):
+            ready.append(p)
+    return ready
+
+
+def run_provider(name: str, user_request, media_info, previews, platforms) -> GenieResult:
+    if name == "gemini":
+        return _run_gemini(user_request, media_info, previews, platforms)
+    if name == "cloudflare":
+        return _run_cloudflare(user_request, media_info, previews, platforms)
+    raise AIError(f"Unknown AI provider: {name}", False)
+
+
+def run_genie(user_request: str, media_info: list[dict],
+              previews: list[tuple[int, bytes]], platforms: list[str]) -> GenieResult:
+    providers = configured_providers()
+    if not providers:
+        raise RuntimeError("No AI provider is configured (set CLOUDFLARE_AI_TOKEN and/or GEMINI_API_KEY)")
+
+    errors = []
+    for name in providers:
+        try:
+            result = _with_retries(
+                lambda: run_provider(name, user_request, media_info, previews, platforms), name
+            )
+            log.info("AI provider used: %s", name)
+            return result
+        except Exception as e:
+            errors.append(f"{name}: {mask(str(e))[:200]}")
+            log.warning("AI provider %s failed, trying the next one", name)
+    raise RuntimeError("All AI providers failed. " + " | ".join(errors))
 
 
 # ---- Validation: never trust the AI's output ------------------------------
@@ -206,7 +464,7 @@ def sanitize(result: GenieResult, n_assets: int, fallback_text: str,
 
 
 def fallback(user_text: str, platforms: list[str]) -> tuple[dict, dict]:
-    """Used when the AI is unavailable. user_text = only what the customer typed themselves."""
+    """Used when every AI provider is unavailable. user_text = only what the customer typed."""
     copy = {
         pid: {"caption": clean_caption(user_text, PLATFORM_RULES[pid]["max_chars"]), "tags": []}
         for pid in platforms

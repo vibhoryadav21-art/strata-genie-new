@@ -32,7 +32,7 @@ export default async function Pricing() {
       );
     }
     return (
-      <Link href={`/genie/signup?plan=${plan}`} className="btn">
+      <Link href={`/strata/genie/signup?plan=${plan}`} className="btn">
         Choose {label}
       </Link>
     );
@@ -100,14 +100,14 @@ export default async function Pricing() {
           {loggedIn ? (
             <>
               <p>You're on the free trial.</p>
-              <Link href="/genie/campaigns/new" className="btn secondary">
+              <Link href="/strata/genie/campaigns/new" className="btn secondary">
                 Create a campaign
               </Link>
             </>
           ) : (
             <>
               <p>Not sure yet? Try Genie free for 7 days with one post.</p>
-              <Link href="/genie/signup?plan=trial" className="btn secondary">
+              <Link href="/strata/genie/signup?plan=trial" className="btn secondary">
                 Start free trial
               </Link>
             </>

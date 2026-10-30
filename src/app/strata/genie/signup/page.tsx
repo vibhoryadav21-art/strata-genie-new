@@ -15,7 +15,7 @@ export default async function Signup({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (user) redirect("/genie/campaigns");
+  if (user) redirect("/strata/genie/campaigns");
 
   return (
     <main className="container center">
@@ -23,7 +23,7 @@ export default async function Signup({
       <p>Every account starts with a free 7-day trial and one post.</p>
       <AuthForm mode="signup" plan={plan} />
       <p>
-        Already have an account? <Link href="/genie/login">Log in</Link>
+        Already have an account? <Link href="/strata/genie/login">Log in</Link>
       </p>
     </main>
   );

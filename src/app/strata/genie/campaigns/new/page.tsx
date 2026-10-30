@@ -11,14 +11,14 @@ export default async function NewCampaign() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/genie/login");
+  if (!user) redirect("/strata/genie/login");
 
   const { data: profile } = await supabase
     .from("profiles")
     .select("*")
     .eq("id", user.id)
     .single();
-  if (!profile || !getPlanStatus(profile).canPost) redirect("/genie/campaigns");
+  if (!profile || !getPlanStatus(profile).canPost) redirect("/strata/genie/campaigns");
 
   const { data: accounts } = await supabase
     .from("social_accounts")

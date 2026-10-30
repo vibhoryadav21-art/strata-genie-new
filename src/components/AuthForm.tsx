@@ -29,20 +29,20 @@ export default function AuthForm({
         email,
         password,
         options: {
-          emailRedirectTo: `${location.origin}/genie/campaigns`,
+          emailRedirectTo: `${location.origin}/strata/genie/campaigns`,
           data: { selected_plan: plan ?? "trial" },
         },
       });
       if (error) setError(error.message);
       else if (data.session) {
-        router.push("/genie/campaigns");
+        router.push("/strata/genie/campaigns");
         router.refresh();
       } else setMessage("Check your email to confirm your account.");
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setError(error.message);
       else {
-        router.push("/genie/campaigns");
+        router.push("/strata/genie/campaigns");
         router.refresh();
       }
     }

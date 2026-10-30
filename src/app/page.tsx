@@ -5,35 +5,56 @@ export default function Home() {
     <main>
       <section className="hero full">
         <div className="hero-inner">
-          <h1>Focused software that does the work for you.</h1>
+          <h1>Making communities digitally safe.</h1>
           <p className="lead">
-            STRATA builds products that take a task off your hands. Our first, Genie, turns your
-            photos and videos into ready-to-post social content.
+            WhiteCloak Labs is a non-profit initiative working on end-to-end security and
+            cybersecurity, and on empowering young people to shape a safer digital world.
           </p>
           <div className="hero-actions">
-            <Link href="/genie" className="btn light">
-              Explore Genie
+            <Link href="/strata" className="btn light">
+              Explore STRATA
             </Link>
-            <Link href="/erudite" className="btn ghost">
-              Erudite, coming soon
-            </Link>
+            <a href="#mission" className="btn ghost">
+              Our mission
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section id="mission" className="band">
+        <h2>Mission and vision</h2>
+        <p>
+          Our mission is to make communities digitally safe and to empower youth. We imagine a
+          digital world where every community can use technology with confidence, and where young
+          people have the skills to protect themselves and others.
+        </p>
+      </section>
+
+      <section className="container">
+        <div className="features">
+          <div className="card">
+            <h3>Security</h3>
+            <p>End-to-end security and cybersecurity work that protects people and their data.</p>
+          </div>
+          <div className="card">
+            <h3>Communities</h3>
+            <p>Practical help that makes everyday digital life safer for the people around us.</p>
+          </div>
+          <div className="card">
+            <h3>Youth</h3>
+            <p>Skills, tools and opportunities for young people to lead on digital safety.</p>
           </div>
         </div>
       </section>
 
       <section className="products">
-        <Link href="/genie" className="product-tile">
-          <h2>Genie</h2>
+        <Link href="/strata" className="product-tile">
+          <h2>STRATA</h2>
           <p>
-            Upload your photos and videos, describe the post you want, and Genie edits them for
-            every platform and writes the caption and tags.
+            Our product line. Genie turns photos and videos into ready-to-post social content,
+            and more products are on the way.
           </p>
-          <span className="more">Explore Genie</span>
-        </Link>
-        <Link href="/erudite" className="product-tile">
-          <h2>Erudite</h2>
-          <p>Coming soon.</p>
-          <span className="more">Learn more</span>
+          <span className="more">Explore STRATA</span>
         </Link>
       </section>
     </main>
