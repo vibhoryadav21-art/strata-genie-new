@@ -15,6 +15,7 @@ import AutoRefresh from "@/components/AutoRefresh";
 import DeleteCampaignButton from "@/components/DeleteCampaignButton";
 import ActionButton from "@/components/ActionButton";
 import CampaignName from "@/components/CampaignName";
+import GroupView from "@/components/GroupView";
 
 type Card = {
   id: string;
@@ -54,10 +55,11 @@ export default async function CampaignPage({
   // Row Level Security: other people's campaigns simply aren't found.
   const { data: campaign } = await supabase
     .from("campaigns")
-    .select("id, name, caption_input, status, created_at, ai_note")
+    .select("id, name, caption_input, status, created_at, ai_note, is_group, parent_id, platforms")
     .eq("id", id)
     .single();
   if (!campaign) notFound();
+  if (campaign.is_group) return <GroupView campaign={campaign} />;
 
   const reviewable = campaign.status === "ready" || campaign.status === "posted";
   const cards: Card[] = [];
@@ -135,7 +137,15 @@ export default async function CampaignPage({
   return (
     <main className="container">
       <p>
-        <Link href="/strata/genie/campaigns">← Back to campaigns</Link>
+        <Link
+          href={
+            campaign.parent_id
+              ? `/strata/genie/campaigns/${campaign.parent_id}`
+              : "/strata/genie/campaigns"
+          }
+        >
+          {campaign.parent_id ? "← Back to the campaign" : "← Back to campaigns"}
+        </Link>
       </p>
       <h1 className="camp-h1">
         <CampaignName

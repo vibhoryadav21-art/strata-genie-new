@@ -29,7 +29,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
   return NextResponse.json({ ok: true });
 }
 
-// Delete a campaign and its files
+// Delete a campaign (or a whole multi-item campaign) and its files
 export async function DELETE(_request: Request, { params }: Ctx) {
   const { id } = await params;
   const supabase = await createClient();
@@ -41,12 +41,25 @@ export async function DELETE(_request: Request, { params }: Ctx) {
   // Row Level Security: only the user's own campaigns can be found.
   const { data: campaign } = await supabase
     .from("campaigns")
-    .select("id, user_id, status")
+    .select("id, user_id, status, is_group")
     .eq("id", id)
     .single();
   if (!campaign) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (campaign.status === "processing") {
+  let childIds: string[] = [];
+  if (campaign.is_group) {
+    const { data: kids } = await supabase
+      .from("campaigns")
+      .select("id, status")
+      .eq("parent_id", id);
+    if ((kids ?? []).some((k) => k.status === "processing")) {
+      return NextResponse.json(
+        { error: "Genie is working on one of the items right now. Try again when it's finished." },
+        { status: 409 }
+      );
+    }
+    childIds = (kids ?? []).map((k) => k.id);
+  } else if (campaign.status === "processing") {
     return NextResponse.json(
       { error: "Genie is working on this campaign right now. Try again when it's finished." },
       { status: 409 }
@@ -55,11 +68,15 @@ export async function DELETE(_request: Request, { params }: Ctx) {
 
   // Files first. If this fails, nothing is lost and the user can simply retry.
   try {
+    for (const childId of childIds) {
+      await deletePrefix(`${campaign.user_id}/${childId}/`);
+    }
     await deletePrefix(`${campaign.user_id}/${campaign.id}/`);
   } catch {
     return NextResponse.json({ error: "Could not delete the files. Please try again." }, { status: 500 });
   }
 
+  // The items are removed together with their group
   const { data: deleted, error } = await supabase
     .from("campaigns")
     .delete()

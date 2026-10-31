@@ -13,11 +13,14 @@ export type RowData = {
   createdAt: string;
   status: string;
   statusLabel: string;
+  isGroup: boolean;
+  itemCount: number;
   active: boolean;
   attention: string[];
   scheduled: number;
   published: number;
   failed: number;
+  waiting: number;
   nextAt: string | null;
   postableIds: string[];
   canDelete: boolean;
@@ -25,11 +28,13 @@ export type RowData = {
 
 export default function CampaignRow({ row, accounts }: { row: RowData; accounts: Account[] }) {
   const [open, setOpen] = useState(false);
-  const canPost = row.postableIds.length > 0;
+  const canPost = !row.isGroup && row.postableIds.length > 0;
 
   const parts: string[] = [];
+  if (row.isGroup) parts.push(`${row.itemCount} item${row.itemCount === 1 ? "" : "s"}`);
   if (row.published) parts.push(`${row.published} published`);
-  if (row.scheduled) parts.push(`${row.scheduled} scheduled`);
+  if (row.scheduled) parts.push(`${row.scheduled} post${row.scheduled === 1 ? "" : "s"} scheduled`);
+  if (row.waiting) parts.push(`${row.waiting} waiting to be processed`);
   if (row.failed) parts.push(`${row.failed} failed`);
 
   return (
@@ -48,7 +53,7 @@ export default function CampaignRow({ row, accounts }: { row: RowData; accounts:
             {row.nextAt && (
               <>
                 {" "}
-                · next post <LocalTime iso={row.nextAt} />
+                · next <LocalTime iso={row.nextAt} />
               </>
             )}
           </div>
@@ -72,7 +77,13 @@ export default function CampaignRow({ row, accounts }: { row: RowData; accounts:
             className="btn xs secondary"
             onClick={() => setOpen((v) => !v)}
             disabled={!canPost}
-            title={canPost ? undefined : "Available once the campaign is ready and an Instagram version exists"}
+            title={
+              row.isGroup
+                ? "Open the campaign to post its items"
+                : canPost
+                ? undefined
+                : "Available once the campaign is ready and an Instagram version exists"
+            }
           >
             {open ? "Close" : "Post"}
           </button>

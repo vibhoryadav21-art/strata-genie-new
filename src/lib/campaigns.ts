@@ -16,6 +16,9 @@ export type CampaignLite = {
   status: string;
   created_at: string;
   ai_note: string | null;
+  is_group?: boolean;
+  parent_id?: string | null;
+  process_at?: string | null;
 };
 
 export function displayName(name: string | null | undefined, fallback: string): string {
@@ -27,9 +30,12 @@ export function displayName(name: string | null | undefined, fallback: string): 
 
 export type Flags = {
   attention: string[]; // reasons. Empty = nothing needs attention
-  active: boolean;
+  active: boolean; // something is scheduled for the future (a post, or processing at a set time)
   posted: boolean;
-  scheduled: number;
+  ready: boolean;
+  processing: boolean;
+  waiting: number; // items waiting for their scheduled processing time
+  scheduled: number; // posts scheduled or being published
   published: number;
   failed: number; // failed posts nobody has dealt with yet
   nextAt: string | null;
@@ -53,6 +59,8 @@ export function computeFlags(c: CampaignLite, posts: PostLite[], now = Date.now(
   );
   const pending = posts.filter((p) => p.status === "scheduled" || p.status === "publishing");
   const published = posts.filter((p) => p.status === "published");
+  const waiting =
+    c.status === "queued" && !!c.process_at && new Date(c.process_at).getTime() > now + 15_000;
 
   const attention: string[] = [];
   if (c.status === "failed") attention.push("Processing failed");
@@ -64,14 +72,41 @@ export function computeFlags(c: CampaignLite, posts: PostLite[], now = Date.now(
     attention.push(`${unresolved.length} post${unresolved.length > 1 ? "s" : ""} failed`);
   }
 
+  const nexts = [
+    ...pending.map((p) => p.scheduled_for),
+    ...(waiting && c.process_at ? [c.process_at] : []),
+  ].sort();
+
   return {
     attention,
-    active: pending.length > 0,
+    active: pending.length > 0 || waiting,
     posted: c.status === "posted" || published.length > 0,
+    ready: c.status === "ready",
+    processing: c.status === "processing" || (c.status === "queued" && !waiting),
+    waiting: waiting ? 1 : 0,
     scheduled: pending.length,
     published: published.length,
     failed: unresolved.length,
-    nextAt: pending.map((p) => p.scheduled_for).sort()[0] ?? null,
+    nextAt: nexts[0] ?? null,
+  };
+}
+
+// A group's flags are the combination of its items' flags
+export function aggregateFlags(children: Flags[]): Flags {
+  const sum = (f: (x: Flags) => number) => children.reduce((s, x) => s + f(x), 0);
+  const needing = children.filter((x) => x.attention.length > 0).length;
+  return {
+    attention:
+      needing > 0 ? [`${needing} item${needing > 1 ? "s" : ""} need${needing > 1 ? "" : "s"} attention`] : [],
+    active: children.some((x) => x.active),
+    posted: children.some((x) => x.posted),
+    ready: children.some((x) => x.ready),
+    processing: children.some((x) => x.processing),
+    waiting: sum((x) => x.waiting),
+    scheduled: sum((x) => x.scheduled),
+    published: sum((x) => x.published),
+    failed: sum((x) => x.failed),
+    nextAt: children.map((x) => x.nextAt).filter((v): v is string => !!v).sort()[0] ?? null,
   };
 }
 
@@ -86,20 +121,20 @@ export const FILTERS = [
 
 export type FilterKey = (typeof FILTERS)[number]["key"];
 
-export function matches(filter: FilterKey, c: CampaignLite, f: Flags): boolean {
+export function matches(filter: FilterKey, f: Flags): boolean {
   switch (filter) {
     case "all":
       return true;
     case "active":
       return f.active;
     case "ready":
-      return c.status === "ready";
+      return f.ready;
     case "posted":
       return f.posted;
     case "attention":
       return f.attention.length > 0;
     case "processing":
-      return c.status === "queued" || c.status === "processing";
+      return f.processing;
   }
 }
 
@@ -110,4 +145,5 @@ export const STATUS_LABEL: Record<string, string> = {
   ready: "Ready",
   posted: "Posted",
   failed: "Failed",
+  group: "Multi-item",
 };

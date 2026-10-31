@@ -6,9 +6,11 @@ import { accountPlatformOf, checkPostable, kindOf } from "@/lib/platforms";
 import {
   FILTERS,
   STATUS_LABEL,
+  aggregateFlags,
   computeFlags,
   matches,
   type CampaignLite,
+  type Flags,
   type FilterKey,
   type PostLite,
 } from "@/lib/campaigns";
@@ -26,6 +28,16 @@ type OutDb = {
   post_jobs: PostDb[] | null;
 };
 type CampaignDb = CampaignLite & { outputs: OutDb[] | null };
+
+const SELECT =
+  "id, name, caption_input, status, created_at, ai_note, is_group, parent_id, process_at, outputs(id, platform, storage_keys, post_jobs(id, social_account_id, status, scheduled_for, published_at, error, created_at))";
+
+function flagsFor(c: CampaignDb): Flags {
+  const posts: PostLite[] = (c.outputs ?? []).flatMap((o) =>
+    (o.post_jobs ?? []).map((p) => ({ ...p, output_id: o.id }))
+  );
+  return computeFlags(c, posts);
+}
 
 export default async function Campaigns({
   searchParams,
@@ -51,15 +63,29 @@ export default async function Campaigns({
   }
   const status = getPlanStatus(profile);
 
-  // One query: campaigns with their versions and the posts of each version
-  const { data: campaignRows } = await supabase
+  // Top-level campaigns (single ones and multi-item groups), and all items of the groups
+  const { data: topRows } = await supabase
     .from("campaigns")
-    .select(
-      "id, name, caption_input, status, created_at, ai_note, outputs(id, platform, storage_keys, post_jobs(id, social_account_id, status, scheduled_for, published_at, error, created_at))"
-    )
+    .select(SELECT)
+    .is("parent_id", null)
     .order("created_at", { ascending: false })
     .limit(200);
-  const campaigns = (campaignRows ?? []) as unknown as CampaignDb[];
+  const { data: childRows } = await supabase
+    .from("campaigns")
+    .select(SELECT)
+    .not("parent_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1000);
+
+  const top = (topRows ?? []) as unknown as CampaignDb[];
+  const children = (childRows ?? []) as unknown as CampaignDb[];
+  const childrenOf = new Map<string, CampaignDb[]>();
+  for (const ch of children) {
+    if (!ch.parent_id) continue;
+    const list = childrenOf.get(ch.parent_id) ?? [];
+    list.push(ch);
+    childrenOf.set(ch.parent_id, list);
+  }
 
   const { data: accountRows } = await supabase
     .from("social_accounts")
@@ -67,12 +93,18 @@ export default async function Campaigns({
     .order("created_at");
   const accounts = (accountRows ?? []) as Account[];
 
-  const items = campaigns.map((c) => {
+  const items = top.map((c) => {
+    if (c.is_group) {
+      const kids = childrenOf.get(c.id) ?? [];
+      return {
+        c,
+        flags: aggregateFlags(kids.map(flagsFor)),
+        postableIds: [] as string[],
+        itemCount: kids.length,
+        canDelete: !kids.some((k) => k.status === "processing"),
+      };
+    }
     const outs = c.outputs ?? [];
-    const posts: PostLite[] = outs.flatMap((o) =>
-      (o.post_jobs ?? []).map((p) => ({ ...p, output_id: o.id }))
-    );
-    const flags = computeFlags(c, posts);
     const postableIds =
       c.status === "ready" || c.status === "posted"
         ? outs
@@ -83,33 +115,39 @@ export default async function Campaigns({
             )
             .map((o) => o.id)
         : [];
-    return { c, flags, postableIds };
+    return { c, flags: flagsFor(c), postableIds, itemCount: 0, canDelete: c.status !== "processing" };
   });
 
   const counts: Record<string, number> = {};
-  for (const f of FILTERS) counts[f.key] = items.filter((i) => matches(f.key, i.c, i.flags)).length;
+  for (const f of FILTERS) counts[f.key] = items.filter((i) => matches(f.key, i.flags)).length;
 
-  const visible = items.filter((i) => matches(filter, i.c, i.flags));
-  const rows: RowData[] = visible.map(({ c, flags, postableIds }) => ({
-    id: c.id,
-    name: c.name,
-    caption: c.caption_input,
-    createdAt: c.created_at,
-    status: c.status,
-    statusLabel: STATUS_LABEL[c.status] ?? c.status,
-    active: flags.active,
-    attention: flags.attention,
-    scheduled: flags.scheduled,
-    published: flags.published,
-    failed: flags.failed,
-    nextAt: flags.nextAt,
-    postableIds,
-    canDelete: c.status !== "processing",
-  }));
+  const rows: RowData[] = items
+    .filter((i) => matches(filter, i.flags))
+    .map(({ c, flags, postableIds, itemCount, canDelete }) => ({
+      id: c.id,
+      name: c.name,
+      caption: c.caption_input,
+      createdAt: c.created_at,
+      status: c.is_group ? "group" : c.status,
+      statusLabel: c.is_group
+        ? "Multi-item"
+        : c.status === "queued" && flags.waiting
+        ? "Scheduled"
+        : STATUS_LABEL[c.status] ?? c.status,
+      isGroup: !!c.is_group,
+      itemCount,
+      active: flags.active,
+      attention: flags.attention,
+      scheduled: flags.scheduled,
+      published: flags.published,
+      failed: flags.failed,
+      waiting: flags.waiting,
+      nextAt: flags.nextAt,
+      postableIds,
+      canDelete,
+    }));
 
-  const needsRefresh = items.some(
-    (i) => i.c.status === "queued" || i.c.status === "processing" || i.flags.active
-  );
+  const needsRefresh = items.some((i) => i.flags.processing || i.flags.active);
 
   return (
     <main className="container wide">
@@ -123,9 +161,7 @@ export default async function Campaigns({
           </Link>
         ) : (
           <div className="head-note">
-            <small>
-              {status.trialExpired ? "Your trial has ended." : "Post limit reached."}
-            </small>
+            <small>{status.trialExpired ? "Your trial has ended." : "Post limit reached."}</small>
             <Link href="/strata/genie/pricing" className="btn small secondary">
               See plans
             </Link>
@@ -151,7 +187,7 @@ export default async function Campaigns({
             <CampaignRow key={row.id} row={row} accounts={accounts} />
           ))}
         </div>
-      ) : campaigns.length === 0 ? (
+      ) : top.length === 0 ? (
         <p>No campaigns yet. Create your first one with the button above.</p>
       ) : (
         <p>No campaigns match this filter.</p>

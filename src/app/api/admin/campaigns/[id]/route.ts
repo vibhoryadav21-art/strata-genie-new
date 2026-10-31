@@ -24,14 +24,20 @@ export async function DELETE(_request: Request, { params }: Ctx) {
   const { id } = await params;
   if (!UUID.test(id)) return NextResponse.json({ error: "Invalid campaign" }, { status: 400 });
 
-  const { data: campaign } = await admin.supabase
+    const { data: campaign } = await admin.supabase
     .from("campaigns")
-    .select("id, user_id")
+    .select("id, user_id, is_group")
     .eq("id", id)
     .single();
   if (!campaign) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
+    if (campaign.is_group) {
+      const { data: kids } = await admin.supabase.from("campaigns").select("id").eq("parent_id", id);
+      for (const k of kids ?? []) {
+        await deletePrefix(`${campaign.user_id}/${k.id}/`);
+      }
+    }
     await deletePrefix(`${campaign.user_id}/${campaign.id}/`);
   } catch {
     return NextResponse.json({ error: "Could not delete the files. Try again." }, { status: 500 });

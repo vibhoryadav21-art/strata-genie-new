@@ -18,7 +18,9 @@ export default async function NewCampaign() {
     .select("*")
     .eq("id", user.id)
     .single();
-  if (!profile || !getPlanStatus(profile).canPost) redirect("/strata/genie/campaigns");
+  if (!profile) redirect("/strata/genie/campaigns");
+  const status = getPlanStatus(profile);
+  if (!status.canPost) redirect("/strata/genie/campaigns");
 
   const { data: accounts } = await supabase
     .from("social_accounts")
@@ -28,7 +30,7 @@ export default async function NewCampaign() {
   return (
     <main className="container">
       <h1>New campaign</h1>
-      <NewCampaignForm accounts={(accounts ?? []) as Account[]} />
+      <NewCampaignForm accounts={(accounts ?? []) as Account[]} remaining={status.remaining} />
     </main>
   );
 }

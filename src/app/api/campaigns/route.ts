@@ -12,6 +12,7 @@ type Body = {
   publishMode?: unknown;
   publishAt?: unknown;
   accountIds?: unknown;
+  name?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -87,6 +88,7 @@ export async function POST(request: Request) {
     .insert({
       user_id: user.id,
       caption_input: caption,
+      name: String(body.name ?? "").trim().slice(0, 80) || null,
       notes,
       platforms,
       publish_mode: mode,

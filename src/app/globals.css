@@ -200,3 +200,16 @@ select.inline { padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; fo
 .account-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .account-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #eee; }
 
+.pill.group { background: #ece9ff; color: #3b2d8a; }
+.pill.queued { background: #eef2ff; color: #3730a3; }
+
+.struct { background: #f6f6f8; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.slots { font-size: 0.85rem; background: #f6f6f8; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+.slots div { display: flex; justify-content: space-between; gap: 12px; }
+
+.item-list { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.item-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 10px 14px; }
+.item-thumb { width: 64px; height: 64px; border-radius: 8px; overflow: hidden; background: #eee; flex-shrink: 0; }
+.item-thumb img, .item-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.item-main { flex: 1 1 240px; min-width: 0; }
+
