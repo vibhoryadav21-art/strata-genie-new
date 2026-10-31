@@ -254,6 +254,7 @@ export default async function CampaignPage({
               blockedReason={c.blockedReason}
               accounts={c.accounts}
               posts={c.posts}
+              removable={cards.length > 1}
             />
           ))}
         </section>
