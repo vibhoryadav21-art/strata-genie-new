@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 export default function DeleteCampaignButton({
   id,
   disabled,
+  compact,
 }: {
   id: string;
   disabled?: boolean;
+  compact?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -29,16 +31,19 @@ export default function DeleteCampaignButton({
   }
 
   return (
-    <div>
-      <button className="btn small danger" onClick={onDelete} disabled={busy || disabled}>
-        {busy ? "Deleting…" : "Delete campaign"}
+    <span>
+      <button
+        className={compact ? "btn xs danger" : "btn small danger"}
+        onClick={onDelete}
+        disabled={busy || disabled}
+        title={disabled ? "Can't delete while Genie is processing" : undefined}
+      >
+        {busy ? "Deleting…" : "Delete"}
       </button>
-      {disabled && (
-        <p style={{ margin: "6px 0 0" }}>
-          <small>Can't delete while Genie is processing.</small>
-        </p>
+      {!compact && disabled && (
+        <small style={{ display: "block", marginTop: 6 }}>Can't delete while Genie is processing.</small>
       )}
-      {error && <p className="error">{error}</p>}
-    </div>
+      {error && <small className="error"> {error}</small>}
+    </span>
   );
 }

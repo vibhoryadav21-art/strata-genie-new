@@ -13,7 +13,7 @@ export default async function GenieLayout({ children }: { children: React.ReactN
     ...(user
       ? [
           { href: "/strata/genie/campaigns", label: "Campaigns" },
-          { href: "/strata/genie/accounts", label: "Connected accounts" },
+          { href: "/strata/genie/profile", label: "Profile" },
         ]
       : []),
   ];

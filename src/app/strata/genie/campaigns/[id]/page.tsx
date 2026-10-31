@@ -14,6 +14,7 @@ import PublishControls, { type Account } from "@/components/PublishControls";
 import AutoRefresh from "@/components/AutoRefresh";
 import DeleteCampaignButton from "@/components/DeleteCampaignButton";
 import ActionButton from "@/components/ActionButton";
+import CampaignName from "@/components/CampaignName";
 
 type Card = {
   id: string;
@@ -53,7 +54,7 @@ export default async function CampaignPage({
   // Row Level Security: other people's campaigns simply aren't found.
   const { data: campaign } = await supabase
     .from("campaigns")
-    .select("id, caption_input, status, created_at, ai_note")
+    .select("id, name, caption_input, status, created_at, ai_note")
     .eq("id", id)
     .single();
   if (!campaign) notFound();
@@ -134,9 +135,16 @@ export default async function CampaignPage({
   return (
     <main className="container">
       <p>
-        <Link href="/strata/genie/campaigns">← Back to dashboard</Link>
+        <Link href="/strata/genie/campaigns">← Back to campaigns</Link>
       </p>
-      <h1>Your campaign</h1>
+      <h1 className="camp-h1">
+        <CampaignName
+          id={campaign.id}
+          name={campaign.name}
+          fallback={campaign.caption_input}
+          large
+        />
+      </h1>
       <div className="card">
         <small>Your request · {new Date(campaign.created_at).toLocaleDateString()}</small>
         <p style={{ margin: "6px 0 0" }}>{campaign.caption_input}</p>
@@ -162,7 +170,12 @@ export default async function CampaignPage({
       {campaign.status === "failed" && (
         <div className="card" style={{ marginTop: 24 }}>
           <h3 style={{ marginTop: 0 }}>Something went wrong</h3>
-          <p>We couldn't process this campaign. Please try again, or contact support.</p>
+          <p>We couldn't process this campaign. You can try again, or delete it.</p>
+          <ActionButton
+            url={`/api/campaigns/${campaign.id}/regenerate`}
+            label="Try again"
+            className="btn small"
+          />
         </div>
       )}
 
@@ -185,12 +198,20 @@ export default async function CampaignPage({
             <div className="banner">
               <p style={{ margin: "0 0 8px" }}>
                 Genie's AI couldn't be used for this campaign, so the text below is only a basic
-                version, and nothing was posted automatically. You can edit it yourself, or try again.
+                version, and nothing was posted automatically. You can edit it yourself, try
+                again, or keep it as it is.
               </p>
-              <ActionButton
-                url={`/api/campaigns/${campaign.id}/regenerate`}
-                label="Regenerate with AI"
-              />
+              <div className="actions-cell">
+                <ActionButton
+                  url={`/api/campaigns/${campaign.id}/regenerate`}
+                  label="Regenerate with AI"
+                  className="btn small"
+                />
+                <ActionButton
+                  url={`/api/campaigns/${campaign.id}/dismiss-note`}
+                  label="Keep this text"
+                />
+              </div>
             </div>
           )}
 

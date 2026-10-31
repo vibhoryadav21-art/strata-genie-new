@@ -2,10 +2,35 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { deletePrefix } from "@/lib/r2";
 
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+type Ctx = { params: Promise<{ id: string }> };
+
+// Rename a campaign
+export async function PATCH(request: Request, { params }: Ctx) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+
+  let body: { name?: unknown };
+  try {
+    body = (await request.json()) as { name?: unknown };
+  } catch {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+  }
+  const name = String(body.name ?? "").trim();
+  if (name.length > 80) {
+    return NextResponse.json({ error: "The name can have at most 80 characters." }, { status: 400 });
+  }
+
+  const { error } = await supabase.rpc("rename_campaign", { p_id: id, p_name: name });
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ ok: true });
+}
+
+// Delete a campaign and its files
+export async function DELETE(_request: Request, { params }: Ctx) {
   const { id } = await params;
   const supabase = await createClient();
   const {
@@ -35,7 +60,6 @@ export async function DELETE(
     return NextResponse.json({ error: "Could not delete the files. Please try again." }, { status: 500 });
   }
 
-  // Then the database rows (media, outputs and jobs are removed automatically).
   const { data: deleted, error } = await supabase
     .from("campaigns")
     .delete()

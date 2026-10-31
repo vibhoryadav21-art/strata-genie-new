@@ -278,7 +278,7 @@ export default function NewCampaignForm({ accounts }: { accounts: Account[] }) {
           {accounts.length === 0 ? (
             <p>
               <small>
-                No account connected yet. <Link href="/strata/genie/accounts">Connect Instagram</Link>, then
+                No account connected yet. <Link href="/strata/genie/profile">Connect Instagram</Link>, then
                 come back.
               </small>
             </p>

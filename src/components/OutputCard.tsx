@@ -214,8 +214,12 @@ export default function OutputCard({
               )}
               {p.error && <span className="error"> {p.error}</span>}
             </span>
-            {p.status === "scheduled" && (
-              <ActionButton url={`/api/posts/${p.id}`} method="DELETE" label="Cancel" />
+            {(p.status === "scheduled" || p.status === "failed") && (
+              <ActionButton
+                url={`/api/posts/${p.id}`}
+                method="DELETE"
+                label={p.status === "scheduled" ? "Cancel" : "Dismiss"}
+              />
             )}
           </div>
         ))}
